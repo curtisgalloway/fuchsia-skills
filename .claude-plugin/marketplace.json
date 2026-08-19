@@ -1,0 +1,18 @@
+{
+  "name": "fuchsia-skills",
+  "owner": {
+    "name": "curtisgalloway"
+  },
+  "metadata": {
+    "description": "Agent skills for working on the public Fuchsia tree with Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "fuchsia-skills",
+      "source": "./",
+      "description": "Agent skills for the public Fuchsia tree: source checkout, the Gemini-to-Claude in-tree agent bridge, multi-workstream setup, deep source questions, driver bind debugging, and hardware bench/boot-test CI.",
+      "version": "1.0.0",
+      "author": { "name": "curtisgalloway" }
+    }
+  ]
+}

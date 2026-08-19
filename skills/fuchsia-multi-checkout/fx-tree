@@ -1,0 +1,354 @@
+#!/usr/bin/env bash
+# fx-tree — manage multiple concurrent Fuchsia checkouts on one machine.
+#
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Curtis Galloway
+#
+# Background (verified against the fuchsia tree, 2026-06):
+#   * `fx` and `ffx` already pick the checkout from your *current directory*
+#     (they walk up for `.fx-root` and deliberately IGNORE $FUCHSIA_DIR), and a
+#     $PATH-invoked `fx`/`ffx` auto-redirects into the tree your cwd is in.
+#   * The ffx daemon socket, build config, default device, and build lock are
+#     ALL already per-build-dir in "in-tree" mode:
+#         out/<dir>/.ffx-daemon/daemon.sock     (daemon, per build dir)
+#         out/<dir>/ffx-config.json             (product bundle / repo / sdk)
+#         out/<dir>.device                       (default target, per build dir)
+#         out/<dir>.build_lock                   (build lock, per build dir)
+#   * So multiple *separate checkouts* mostly Just Work concurrently.
+#
+# The real single-checkout assumptions left are:
+#   1. Your shell env. ~/.bashrc pins ONE tree's .jiri_root/bin onto PATH and
+#      sources ONE tree's fx-env.sh. A second tree's shell inherits the wrong
+#      tools/env and only survives via the cwd-redirect. `fx-tree env` fixes a
+#      shell to point at whatever tree it is in.
+#   2. A few SHARED per-user ffx files under ~/.local/share/Fuchsia/ffx:
+#        - emu/instances/<name>          -> emulators are keyed by NAME only, so
+#          two trees launching "fuchsia-emulator" corrupt each other.
+#        - config/.ffx_user_config.json  -> the `targets.manual` list (additive,
+#          usually harmless) and `target.default`. NOTE: current trees removed
+#          `ffx target default set` and BYPASS stateful target.default config
+#          (fxbug.dev/394619603); a stale value only affects checkouts that
+#          predate the fix.
+#      `fx-tree doctor` flags these; the runbook gives the conventions.
+#
+# NOTE: We deliberately do NOT set FFX_ISOLATE_DIR. It flips ffx out of in-tree
+# mode, which STOPS it loading out/<dir>/ffx-config.json (product bundle, repo,
+# qemu/sdk overrides) and breaks `fx ffx emu` / `fx serve`. Isolate mode is for
+# hermetic tests, not for day-to-day multi-tree dev.
+
+set -uo pipefail
+
+PROG=${0##*/}
+
+# Where to look for trees in `list`. Colon- or space-separated.
+IFS=': ' read -r -a SEARCH_ROOTS <<<"${FX_TREE_ROOTS:-$HOME/src}"
+
+# Shared per-user ffx locations (Linux: both config & data fall back to
+# ~/.local/share when the XDG vars are unset; that is what ffx actually does).
+FFX_CONFIG_BASE="${XDG_CONFIG_HOME:-$HOME/.local/share}/Fuchsia/ffx"
+FFX_DATA_BASE="${XDG_DATA_HOME:-$HOME/.local/share}/Fuchsia/ffx"
+FFX_USER_CONFIG="$FFX_CONFIG_BASE/config/.ffx_user_config.json"
+FFX_EMU_INSTANCES="$FFX_DATA_BASE/emu/instances"
+
+c_red=$'\033[31m'; c_grn=$'\033[32m'; c_yel=$'\033[33m'; c_dim=$'\033[2m'; c_off=$'\033[0m'
+[[ -t 2 ]] || { c_red=; c_grn=; c_yel=; c_dim=; c_off=; }
+
+warn() { printf '%s%s%s\n' "$c_yel" "$*" "$c_off" >&2; }
+err()  { printf '%s%s%s\n' "$c_red" "$*" "$c_off" >&2; }
+
+# Walk up from $1 (default cwd) looking for a .fx-root marker.
+find_tree_root() {
+  local d
+  d=$(cd "${1:-$PWD}" 2>/dev/null && pwd) || return 1
+  while :; do
+    [[ -f $d/.fx-root ]] && { printf '%s\n' "$d"; return 0; }
+    [[ $d == / ]] && return 1
+    d=${d%/*}; [[ -z $d ]] && d=/
+  done
+}
+
+# Echo the active build dir (absolute) for a tree root, if any.
+tree_build_dir() {
+  local root=$1 bd
+  [[ -f $root/.fx-build-dir ]] || return 1
+  bd=$(<"$root/.fx-build-dir"); bd=${bd//$'\n'/}
+  [[ -z $bd ]] && return 1
+  [[ $bd == /* ]] || bd="$root/$bd"
+  printf '%s\n' "$bd"
+}
+
+# Echo the default device for a tree (the per-build-dir <builddir>.device file).
+tree_device() {
+  local bd; bd=$(tree_build_dir "$1") || return 1
+  [[ -f $bd.device ]] && { tr -d '\n' <"$bd.device"; printf '\n'; }
+}
+
+# Print "running"/"stale"/"-" for a tree's per-build-dir daemon.
+tree_daemon_state() {
+  local bd; bd=$(tree_build_dir "$1") || { printf '%s\n' '-'; return; }
+  local pidf="$bd/.ffx-daemon/daemon.pid"
+  if [[ -f $pidf ]]; then
+    local pid; pid=$(tr -dc '0-9' <"$pidf")
+    if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then printf 'running(%s)\n' "$pid"
+    else printf 'stale\n'; fi
+  else printf '%s\n' '-'; fi
+}
+
+ffx_user_default_target() {
+  [[ -f $FFX_USER_CONFIG ]] || return 1
+  # Best-effort extraction without requiring jq.
+  if command -v jq >/dev/null 2>&1; then
+    jq -er '.target.default // empty' "$FFX_USER_CONFIG" 2>/dev/null
+  else
+    grep -oE '"default"[[:space:]]*:[[:space:]]*"[^"]+"' "$FFX_USER_CONFIG" 2>/dev/null \
+      | head -1 | sed -E 's/.*:[[:space:]]*"([^"]+)"/\1/'
+  fi
+}
+
+# ---------------------------------------------------------------------------
+cmd_env() {
+  local root name
+  if ! root=$(find_tree_root "${1:-$PWD}"); then
+    err "$PROG env: not inside a Fuchsia checkout (no .fx-root above ${1:-$PWD})."
+    echo "return 1 2>/dev/null || exit 1"
+    return 1
+  fi
+  name=${root##*/}
+  warn "fx-tree: activating tree '$name' ($root)"
+  # Emit shell code intended to be eval'd / sourced by the caller's shell.
+  cat <<EOF
+# fx-tree env for $root  (eval/source this)
+__fxt_root='$root'
+__fxt_new=''
+IFS=':' read -r -a __fxt_parts <<< "\$PATH"
+for __fxt_p in "\${__fxt_parts[@]}"; do
+  case "\$__fxt_p" in
+    */.jiri_root/bin) ;;
+    '') ;;
+    *) __fxt_new="\${__fxt_new:+\$__fxt_new:}\$__fxt_p" ;;
+  esac
+done
+export PATH="\$__fxt_root/.jiri_root/bin:\$__fxt_new"
+export FUCHSIA_DIR="\$__fxt_root"
+export FX_TREE="\$__fxt_root"
+export FX_TREE_NAME='$name'
+case "\${PS1:-}" in
+  *'[fx:'*) ;;
+  *) [[ -n "\${PS1:-}" ]] && PS1="[fx:$name] \$PS1" ;;
+esac
+unset __fxt_root __fxt_new __fxt_parts __fxt_p
+EOF
+}
+
+# ---------------------------------------------------------------------------
+cmd_doctor() {
+  local root; root=$(find_tree_root "${1:-$PWD}") || { err "Not inside a Fuchsia checkout."; return 1; }
+  local name=${root##*/} ok=1
+  printf '%sTree:%s        %s (%s)\n' "$c_dim" "$c_off" "$name" "$root"
+
+  local bd dev dstate
+  if bd=$(tree_build_dir "$root"); then
+    printf 'Build dir:    %s\n' "${bd#$root/}"
+  else
+    warn 'Build dir:    (none — run `fx set …`)'
+  fi
+  dev=$(tree_device "$root"); printf 'Default dev:  %s\n' "${dev:-(unset; use \`fx set-device\`)}"
+  dstate=$(tree_daemon_state "$root"); printf 'Daemon:       %s\n' "$dstate"
+
+  echo
+  printf '%sShell:%s\n' "$c_dim" "$c_off"
+  # The only thing that matters is that no OTHER tree's .jiri_root/bin precedes
+  # this tree's. Non-jiri dirs ahead (e.g. ~/.local/bin) are harmless.
+  local first_jiri='' p _parts
+  IFS=':' read -r -a _parts <<<"$PATH"
+  for p in "${_parts[@]}"; do
+    case "$p" in */.jiri_root/bin) first_jiri=$p; break ;; esac
+  done
+  if [[ $first_jiri == "$root/.jiri_root/bin" ]]; then
+    printf '  PATH         %sthis tree wins ✓%s\n' "$c_grn" "$c_off"
+  elif [[ -n $first_jiri ]]; then
+    printf '  PATH         %sANOTHER tree is ahead: %s%s\n' "$c_red" "${first_jiri%/.jiri_root/bin}" "$c_off"
+    printf '               run: eval "$(%s env)"\n' "$PROG"; ok=0
+  else
+    printf '  PATH         %sno tree on PATH (run: eval "$(%s env)")%s\n' "$c_yel" "$PROG" "$c_off"; ok=0
+  fi
+  if [[ "${FUCHSIA_DIR:-}" == "$root" ]]; then
+    printf '  FUCHSIA_DIR  %smatches ✓%s\n' "$c_grn" "$c_off"
+  else
+    printf '  FUCHSIA_DIR  %s=%s (does not match this tree)%s\n' "$c_yel" "${FUCHSIA_DIR:-unset}" "$c_off"; ok=0
+  fi
+
+  echo
+  printf '%sShared per-user ffx state (collision sources across ALL trees):%s\n' "$c_dim" "$c_off"
+  local udt; udt=$(ffx_user_default_target)
+  if [[ -n $udt ]]; then
+    printf '  %sWARN%s user-level `target.default`=%s is set (shared file).\n' "$c_yel" "$c_off" "$udt"
+    printf '       Current trees bypass it (fxbug.dev/394619603), but checkouts predating that\n'
+    printf '       fix treat it as an override of EVERY tree. Prefer per-build-dir `fx set-device`;\n'
+    printf '       clear with `ffx config remove target.default`.\n'; ok=0
+  else
+    printf '  %sok%s   no shared user-level default target set.\n' "$c_grn" "$c_off"
+  fi
+  if [[ -f $FFX_USER_CONFIG ]] && grep -q '"manual"' "$FFX_USER_CONFIG" 2>/dev/null; then
+    printf '  %snote%s manually-added targets exist (shared list, usually harmless — additive).\n' "$c_dim" "$c_off"
+  fi
+  if [[ -d $FFX_EMU_INSTANCES ]]; then
+    local insts; insts=$(ls -1 "$FFX_EMU_INSTANCES" 2>/dev/null)
+    if [[ -n $insts ]]; then
+      printf '  %sNOTE%s emulator instances are shared by NAME across trees:\n' "$c_yel" "$c_off"
+      printf '       %s\n' $insts
+      printf '       Give each tree a unique name: `fx ffx emu start --name %s-emu …`\n' "$name"
+    else
+      printf '  %sok%s   no emulator instances present.\n' "$c_grn" "$c_off"
+    fi
+  else
+    printf '  %sok%s   no emulator instances dir yet.\n' "$c_grn" "$c_off"
+  fi
+
+  echo
+  if [[ $ok == 1 ]]; then printf '%sAll clear for this tree.%s\n' "$c_grn" "$c_off"
+  else printf '%sSee warnings above. `eval "$(%s env)"` fixes shell issues.%s\n' "$c_yel" "$PROG" "$c_off"; fi
+}
+
+# ---------------------------------------------------------------------------
+cmd_list() {
+  local found=() r
+  for r in "${SEARCH_ROOTS[@]}"; do
+    [[ -d $r ]] || continue
+    while IFS= read -r m; do found+=("${m%/.fx-root}"); done \
+      < <(find "$r" -maxdepth 4 -name .fx-root -type f 2>/dev/null)
+  done
+  if [[ ${#found[@]} -eq 0 ]]; then
+    warn "No Fuchsia checkouts found under: ${SEARCH_ROOTS[*]}"
+    warn "(set FX_TREE_ROOTS to override the search roots)"
+    return 0
+  fi
+  printf '%-22s %-26s %-22s %s\n' 'TREE' 'BUILD DIR' 'DEVICE' 'DAEMON'
+  local t bd dev ds here
+  here=$(find_tree_root "$PWD" 2>/dev/null)
+  for t in "${found[@]}"; do
+    bd=$(tree_build_dir "$t" 2>/dev/null); bd=${bd#$t/}
+    dev=$(tree_device "$t" 2>/dev/null)
+    ds=$(tree_daemon_state "$t" 2>/dev/null)
+    local mark=' '; [[ $t == "$here" ]] && mark='*'
+    printf '%s%-21s %-26s %-22s %s\n' "$mark" "${t##*/}" "${bd:-—}" "${dev:-—}" "$ds"
+  done
+  [[ -n $here ]] && printf '%s* = your current tree%s\n' "$c_dim" "$c_off"
+}
+
+# ---------------------------------------------------------------------------
+cmd_new() {
+  local name='' parent="${SEARCH_ROOTS[0]}" branch='' ref='' run=0 partial=0
+  local cache="${JIRI_CACHE_DIR:-$HOME/.jiri_cache}"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --branch) branch=$2; shift 2 ;;
+      --reference|--ref) ref=$2; shift 2 ;;
+      --root|--parent) parent=$2; shift 2 ;;
+      --cache) cache=$2; shift 2 ;;
+      --partial) partial=1; shift ;;
+      --run) run=1; shift ;;
+      -*) err "unknown flag: $1"; return 2 ;;
+      *) [[ -z $name ]] && name=$1 || { err "unexpected arg: $1"; return 2; }; shift ;;
+    esac
+  done
+  [[ -z $name ]] && { err "usage: $PROG new NAME [--branch B] [--root DIR] [--partial] [--run]"; return 2; }
+  [[ -z $ref ]] && ref=$(find_tree_root "$PWD" 2>/dev/null)
+  local dest="$parent/$name"
+  local jiri="${ref:+$ref/.jiri_root/bin/jiri}"
+  [[ -z $jiri || ! -x $jiri ]] && jiri='jiri'
+  local pflag=''; [[ $partial == 1 ]] && pflag=' -partial'
+
+  local -a steps=(
+    "mkdir -p '$dest'"
+    "cd '$dest'"
+    "'$jiri' init -cache='$cache'$pflag '$dest'"
+    "'$jiri' import -name=integration flower https://fuchsia.googlesource.com/integration"
+    "'$jiri' update"
+  )
+  [[ -n $branch ]] && steps+=("git -C '$dest' checkout -b '$branch'")
+  steps+=("eval \"\$($PROG env '$dest')\"   # activate the new tree in your shell")
+
+  if [[ $run == 0 ]]; then
+    printf '%sDry run.%s These are the commands to create a new checkout at:\n  %s\n\n' "$c_yel" "$c_off" "$dest"
+    printf '  %s\n' "${steps[@]}"
+    printf '\nNotes:\n'
+    printf '  * `-cache=%s` reuses git objects across trees (big bandwidth win).\n' "$cache"
+    printf '  * Prebuilts (~24G via CIPD) re-download per tree; you have ample disk.\n'
+    printf '  * Re-run with --run to execute, or copy/paste the steps.\n'
+    return 0
+  fi
+
+  [[ -e $dest ]] && { err "$dest already exists; refusing to overwrite."; return 1; }
+  warn "Creating new Fuchsia checkout at $dest (this downloads gigabytes)…"
+  # Execute every step in ONE shell so the `cd '$dest'` step persists across
+  # the rest: `jiri import`/`jiri update` resolve `.jiri_root` from cwd, so
+  # running each step in its own `bash -c` would drop the cd and `jiri import`
+  # fails with "cannot find .jiri_root". `set -e` stops on the first failure;
+  # `set -x` echoes each command (replacing the old per-step `+ …` trace).
+  local s; local -a run_steps=()
+  for s in "${steps[@]}"; do
+    case "$s" in eval*|*"# activate"*) continue ;; esac
+    run_steps+=("$s")
+  done
+  local joined; printf -v joined '%s\n' "${run_steps[@]}"
+  if ! bash -c "set -ex"$'\n'"$joined"; then
+    err "checkout failed (see trace above); partial tree left at $dest"
+    return 1
+  fi
+  printf '%sDone.%s Activate it with:  eval "$(%s env %s)"\n' "$c_grn" "$c_off" "$PROG" "$dest"
+}
+
+# ---------------------------------------------------------------------------
+cmd_shim() {
+  local root; root=$(find_tree_root "${1:-$PWD}") || { err "Not inside a Fuchsia checkout."; return 1; }
+  local envrc="$root/.envrc" excl="$root/.git/info/exclude"
+  if [[ -e $envrc ]] && ! grep -q 'fx-tree env' "$envrc" 2>/dev/null; then
+    warn "$envrc exists and is not an fx-tree shim; leaving it alone."
+  else
+    printf 'eval "$(%s env)"\n' "$PROG" >"$envrc"
+    printf 'Wrote %s (used by direnv if installed).\n' "$envrc"
+  fi
+  if [[ -f $excl ]] && ! grep -qx '/.envrc' "$excl" 2>/dev/null; then
+    printf '/.envrc\n' >>"$excl"
+    printf 'Added /.envrc to %s (won'\''t show in git status).\n' "$excl"
+  fi
+  printf 'Activate now with:  eval "$(%s env)"\n' "$PROG"
+  command -v direnv >/dev/null 2>&1 || warn "direnv is not installed; .envrc will not auto-activate. Use the eval line, or add it to your shell rc."
+}
+
+usage() {
+  cat <<EOF
+$PROG — run multiple Fuchsia checkouts side by side.
+
+USAGE
+  eval "\$($PROG env [DIR])"   Point THIS shell at the tree containing DIR (cwd).
+                              Fixes PATH (.jiri_root/bin), FUCHSIA_DIR, prompt tag.
+  $PROG doctor [DIR]          Diagnose multi-tree hazards for a tree.
+  $PROG list                  List all checkouts (build dir / device / daemon).
+  $PROG new NAME [opts]       Scaffold a new sibling checkout (dry-run by default).
+      --branch B  --root DIR  --reference TREE  --cache DIR  --partial  --run
+  $PROG shim [DIR]            Drop a .envrc shim into a tree (git-excluded).
+  $PROG help                  This help.
+
+CONVENTIONS that avoid the only shared-state collisions:
+  * Use \`fx set-device\` (per build dir). Do NOT use \`ffx target default set\`.
+  * Give each tree a unique emulator name: \`fx ffx emu start --name <tree>-emu\`.
+
+Runbook & rationale: the 'fuchsia-multi-checkout' skill (SKILL.md).
+EOF
+}
+
+main() {
+  local sub=${1:-help}; shift || true
+  case "$sub" in
+    env)    cmd_env "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    list|ls) cmd_list "$@" ;;
+    new)    cmd_new "$@" ;;
+    shim)   cmd_shim "$@" ;;
+    help|-h|--help) usage ;;
+    *) err "unknown subcommand: $sub"; echo; usage; return 2 ;;
+  esac
+}
+main "$@"
