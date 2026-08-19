@@ -63,21 +63,49 @@ turn-key:
 - **`fuchsia-boot-test-ci`** — turning a boot on real hardware into a trustworthy pass/fail verdict,
   and diagnosing the false ones.
 
-## Adjacent skills in another repo
+## Companion skills in public-skills
 
-Not Fuchsia-specific, so they live in
-[curtisgalloway/public-skills](https://github.com/curtisgalloway/public-skills) — install that
-plugin alongside this one if you want them:
+These are not Fuchsia-specific, so they live in
+**[curtisgalloway/public-skills](https://github.com/curtisgalloway/public-skills)** — but several
+of the skills here hand off to them by name, and the clean-room pipeline is squarely aimed at work
+you would be doing *in* Fuchsia. Install that plugin alongside this one:
 
-- **`os-investigator`** + **`peripheral-spec`** + **`cleanroom-implementer`** — a three-stage
-  pipeline for reimplementing a driver in a differently-licensed OS, split across contexts so
-  encumbered source never reaches the agent writing the new code. Directly relevant if you're
-  porting a driver into Fuchsia.
-- **`rpi-expert`**, **`indiedroid-nova-expert`** — board experts (Pi 5 / BCM2712, RK3588S): memory
-  maps, boot chain, SMP, clocks, which datasheet to cite. `fuchsia-source` and
-  `fuchsia-driver-bind-debug` hand off to these for board-specific hardware questions.
-- **`intern-mode`**, **`design-partner`**, **`learn`**, **`wrapup`** — working-style skills: loop
-  safety, thinking-partner mode, capturing lessons, and PR-ready session summaries.
+```
+/plugin marketplace add curtisgalloway/public-skills
+/plugin install public-skills@public-skills
+```
+
+### Porting a driver into Fuchsia
+
+Three skills compose into one pipeline for reimplementing a driver from a differently-licensed OS,
+splitting the work across contexts so encumbered source never reaches the agent that writes the new
+code:
+
+- **`os-investigator`** — reads the Linux/vendor source and returns hardware facts and mechanism
+  descriptions *in original words*, never source, with every fact tagged by provenance
+  (databook / standard / device-tree / source-observed). Ships a mechanical leak scanner.
+- **`peripheral-spec`** — orchestrates the above into a complete clean-room implementation spec for
+  one peripheral (Ethernet MAC, UART, SD/MMC, USB, I2C/SPI, …), and enforces the transfer protocol
+  and the provenance ledger.
+- **`cleanroom-implementer`** — the consumer side: the rules, hooks, and audit procedure for the
+  agent that turns that spec into Fuchsia driver code without ever having seen the original.
+
+Pair these with **`fuchsia-source`** for the target-side question — how the DFv2 API, bind rules,
+and CML routing actually work in the tree you're writing into.
+
+### Board experts
+
+- **`rpi-expert`** (Pi 5 / CM5, BCM2712 + RP1), **`indiedroid-nova-expert`** (RK3588S) — memory
+  maps and MMIO addresses, device tree, boot chain and exception-level hand-off, PSCI/SMP,
+  interrupts, timers, clocks/power, and which datasheet to cite. `fuchsia-source` and
+  `fuchsia-driver-bind-debug` both hand off to these for board-specific hardware questions.
+
+### Working-style skills
+
+- **`intern-mode`** (stop and report after 12 turns without progress — useful on long bring-up
+  sessions), **`design-partner`** (think through an approach without touching code),
+  **`agent-agnostic-skills`** (write skills that survive a change of harness), **`learn`** /
+  **`wrapup`** (capture lessons, generate PR-ready summaries).
 
 ## Installing in Antigravity
 

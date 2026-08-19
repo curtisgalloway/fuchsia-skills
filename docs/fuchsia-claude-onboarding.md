@@ -52,9 +52,28 @@ The in-tree skills themselves are plain `SKILL.md` files and work unmodified und
 - **Never commit the bridge.** `AGENTS.md`, `.claude/`, and `.gitignore` edits don't belong in
   fuchsia.git; the script keeps everything in `.git/info/exclude` for exactly that reason.
 
-## What else in this repo applies to Fuchsia work
+## What else applies to Fuchsia work
 
-Generically useful: `fuchsia-source` (deep source questions via subagent),
+In this repo — generically useful: `fuchsia-source` (deep source questions via subagent),
 `fuchsia-driver-bind-debug` (driver didn't bind), `fuchsia-multi-checkout` (second workstream on
 one machine, `fx worktree`). Written against one specific hardware bench and best treated as
 templates for your own lab: `fuchsia-hardware-bench`, `fuchsia-boot-test-ci`.
+
+In [curtisgalloway/public-skills](https://github.com/curtisgalloway/public-skills), worth
+installing alongside this one:
+
+```
+/plugin marketplace add curtisgalloway/public-skills
+/plugin install public-skills@public-skills
+```
+
+- **Porting a driver into Fuchsia from a differently-licensed OS** — `os-investigator` (reads the
+  original source, returns hardware facts in original words, never code, each tagged by
+  provenance), `peripheral-spec` (turns that into a complete implementation spec for one
+  peripheral), `cleanroom-implementer` (the rules and audit for the agent that writes the Fuchsia
+  driver from the spec). Pair with `fuchsia-source` for the target-side DFv2 / bind / CML question.
+- **Board experts** — `rpi-expert` (Pi 5, BCM2712 + RP1) and `indiedroid-nova-expert` (RK3588S) for
+  memory maps, boot chain, interrupts, clocks, and datasheet citations. `fuchsia-source` and
+  `fuchsia-driver-bind-debug` hand off to these by name for board-specific hardware questions.
+- **Working style** — `intern-mode` (stop and report rather than thrash, handy on long bring-up
+  sessions), `design-partner`, `learn`, `wrapup`.
