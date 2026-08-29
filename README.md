@@ -84,11 +84,15 @@ code:
 - **`os-investigator`** — reads the Linux/vendor source and returns hardware facts and mechanism
   descriptions *in original words*, never source, with every fact tagged by provenance
   (databook / standard / device-tree / source-observed). Ships a mechanical leak scanner.
-- **`peripheral-spec`** — orchestrates the above into a complete clean-room implementation spec for
+- **`cleanroom-spec`** — orchestrates the above into a complete clean-room implementation spec for
   one peripheral (Ethernet MAC, UART, SD/MMC, USB, I2C/SPI, …), and enforces the transfer protocol
   and the provenance ledger.
 - **`cleanroom-implementer`** — the consumer side: the rules, hooks, and audit procedure for the
   agent that turns that spec into Fuchsia driver code without ever having seen the original.
+
+For driver source you own (or may otherwise copy from), **`anchored-peripheral-spec`** produces
+the same spec shape without the wall: every fact carries a `file:line` anchor at a pinned commit
+so a reviewer can check the spec against the code.
 
 Pair these with **`fuchsia-source`** for the target-side question — how the DFv2 API, bind rules,
 and CML routing actually work in the tree you're writing into.

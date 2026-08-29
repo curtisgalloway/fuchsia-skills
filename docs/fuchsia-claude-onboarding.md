@@ -69,7 +69,7 @@ installing alongside this one:
 
 - **Porting a driver into Fuchsia from a differently-licensed OS** — `os-investigator` (reads the
   original source, returns hardware facts in original words, never code, each tagged by
-  provenance), `peripheral-spec` (turns that into a complete implementation spec for one
+  provenance), `cleanroom-spec` (turns that into a complete implementation spec for one
   peripheral), `cleanroom-implementer` (the rules and audit for the agent that writes the Fuchsia
   driver from the spec). Pair with `fuchsia-source` for the target-side DFv2 / bind / CML question.
 - **Board experts** — `rpi-expert` (Pi 5, BCM2712 + RP1) and `indiedroid-nova-expert` (RK3588S) for
