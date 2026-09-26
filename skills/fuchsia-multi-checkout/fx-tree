@@ -256,15 +256,23 @@ cmd_new() {
   [[ -z $ref ]] && ref=$(find_tree_root "$PWD" 2>/dev/null)
   local dest="$parent/$name"
   local jiri="${ref:+$ref/.jiri_root/bin/jiri}"
-  [[ -z $jiri || ! -x $jiri ]] && jiri='jiri'
+  [[ -z $jiri || ! -x $jiri ]] && jiri=$(command -v jiri)
+  [[ -z $jiri ]] && { err "no jiri found: run from inside an existing checkout, pass --reference, or put jiri on PATH"; return 1; }
   local pflag=''; [[ $partial == 1 ]] && pflag=' -partial'
 
+  # `jiri update` replaces its own executable with the newest release, so it
+  # must run from a copy inside the new tree. Running the reference tree's
+  # binary would upgrade that tree's jiri as a side effect and leave the new
+  # tree with none of its own.
+  local newjiri="$dest/.jiri_root/bin/jiri"
   local -a steps=(
     "mkdir -p '$dest'"
     "cd '$dest'"
     "'$jiri' init -cache='$cache'$pflag '$dest'"
-    "'$jiri' import -name=integration flower https://fuchsia.googlesource.com/integration"
-    "'$jiri' update"
+    "mkdir -p '$dest/.jiri_root/bin'"
+    "cp '$jiri' '$newjiri'"
+    "'$newjiri' import -name=integration flower https://fuchsia.googlesource.com/integration"
+    "'$newjiri' update"
   )
   [[ -n $branch ]] && steps+=("git -C '$dest' checkout -b '$branch'")
   steps+=("eval \"\$($PROG env '$dest')\"   # activate the new tree in your shell")
