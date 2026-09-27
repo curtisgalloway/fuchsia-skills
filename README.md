@@ -63,53 +63,109 @@ turn-key:
 - **`fuchsia-boot-test-ci`** — turning a boot on real hardware into a trustworthy pass/fail verdict,
   and diagnosing the false ones.
 
-## Companion skills in public-skills
+## Keeping a tree built: fx-updater
 
-These are not Fuchsia-specific, so they live in
-**[curtisgalloway/public-skills](https://github.com/curtisgalloway/public-skills)** — but several
-of the skills here hand off to them by name, and the clean-room pipeline is squarely aimed at work
-you would be doing *in* Fuchsia. Install that plugin alongside this one:
+**[curtisgalloway/fx-updater](https://github.com/curtisgalloway/fx-updater)** is a small CLI, not a
+skill: it runs `jiri update` and `fx build` on a systemd timer so the first build of your day is
+warm. It skips the run when `jiri status` shows uncommitted work, stops below a free-disk floor,
+and records each outcome in a status file. Early: Linux with systemd only.
+
+```bash
+uv tool install git+https://github.com/curtisgalloway/fx-updater
+fx-updater install --fuchsia-dir /path/to/fuchsia --build-dir core.x64
+fx-updater status
+```
+
+Two habits here depend on it. Re-run `fuchsia-claude-setup` after the scheduled update lands (a
+`--hook` command can do that for you). And a boot-test runner (`fuchsia-boot-test-ci`) that builds
+the same tree should wait on fx-updater's lock rather than build over a `jiri update` in progress;
+its `docs/contract.md` says what is promised. `fx-updater --skill` prints its agent-facing usage.
+
+## Companion skills in driver-lab and public-skills
+
+These are not Fuchsia-specific, so they live elsewhere, but several of the skills here hand off
+to them by name. Both repos install from one marketplace, `curtisg-skills`, which
+[curtisgalloway/public-skills](https://github.com/curtisgalloway/public-skills) hosts:
 
 ```
 /plugin marketplace add curtisgalloway/public-skills
-/plugin install public-skills@public-skills
+/plugin install driver-porting@curtisg-skills
+/plugin install agent-workflow@curtisg-skills
 ```
 
-### Porting a driver into Fuchsia
+`driver-porting` is served from
+**[curtisgalloway/driver-lab](https://github.com/curtisgalloway/driver-lab)**; `agent-workflow`
+from public-skills itself.
+
+### Porting a driver into Fuchsia (driver-lab)
 
 Three skills compose into one pipeline for reimplementing a driver from a differently-licensed OS,
 splitting the work across contexts so encumbered source never reaches the agent that writes the new
 code:
 
-- **`os-investigator`** — reads the Linux/vendor source and returns hardware facts and mechanism
+- **`os-investigator`**: reads the Linux/vendor source and returns hardware facts and mechanism
   descriptions *in original words*, never source, with every fact tagged by provenance
   (databook / standard / device-tree / source-observed). Ships a mechanical leak scanner.
-- **`cleanroom-spec`** — orchestrates the above into a complete clean-room implementation spec for
+- **`cleanroom-spec`**: orchestrates the above into a complete clean-room implementation spec for
   one peripheral (Ethernet MAC, UART, SD/MMC, USB, I2C/SPI, …), and enforces the transfer protocol
   and the provenance ledger.
-- **`cleanroom-implementer`** — the consumer side: the rules, hooks, and audit procedure for the
-  agent that turns that spec into Fuchsia driver code without ever having seen the original.
+- **`cleanroom-implementer`**: the consumer side, with the rules, hooks, and audit procedure for
+  the agent that turns that spec into Fuchsia driver code without ever having seen the original.
 
 For driver source you own (or may otherwise copy from), **`anchored-peripheral-spec`** produces
 the same spec shape without the wall: every fact carries a `file:line` anchor at a pinned commit
-so a reviewer can check the spec against the code.
+so a reviewer can check the spec against the code. **`reference-driver-review`** reviews a driver
+against its reference, and **`spec-verifier`** checks a spec against the sources it cites.
 
-Pair these with **`fuchsia-source`** for the target-side question — how the DFv2 API, bind rules,
+Pair these with **`fuchsia-source`** for the target-side question: how the DFv2 API, bind rules,
 and CML routing actually work in the tree you're writing into.
 
-### Board experts
+### Board experts (driver-lab)
 
-- **`rpi-expert`** (Pi 5 / CM5, BCM2712 + RP1), **`indiedroid-nova-expert`** (RK3588S) — memory
-  maps and MMIO addresses, device tree, boot chain and exception-level hand-off, PSCI/SMP,
-  interrupts, timers, clocks/power, and which datasheet to cite. `fuchsia-source` and
-  `fuchsia-driver-bind-debug` both hand off to these for board-specific hardware questions.
+- **`rpi-expert`** (Pi 5 / CM5, BCM2712 + RP1), **`rpi4-expert`** (Pi 4, BCM2711),
+  **`indiedroid-nova-expert`** (RK3588S), **`pixel10-expert`** (Pixel 10, Tensor G5): memory maps and MMIO
+  addresses, device tree, boot chain and exception-level hand-off, PSCI/SMP, interrupts, timers,
+  clocks/power, and which datasheet to cite. `fuchsia-source` and `fuchsia-driver-bind-debug`
+  both hand off to these for board-specific hardware questions. **`board-spec-scaffold`** starts a
+  new one for a board that has none.
 
-### Working-style skills
+### Working-style skills (public-skills, `agent-workflow`)
 
-- **`intern-mode`** (stop and report after 12 turns without progress — useful on long bring-up
+- **`intern-mode`** (stop and report after 12 turns without progress, useful on long bring-up
   sessions), **`design-partner`** (think through an approach without touching code),
-  **`agent-agnostic-skills`** (write skills that survive a change of harness), **`learn`** /
-  **`wrapup`** (capture lessons, generate PR-ready summaries).
+  **`project-plan`** / **`orchestrate-milestones`** (design doc to milestones, run one per
+  session), **`lab-notebook`** (running notes for a bring-up), **`handoff`** (carry state across a
+  context clear), **`learn`** (capture lessons into instruction files),
+  **`agent-agnostic-skills`** (write skills that survive a change of harness).
+  **`consult`** gets a second opinion from another agent or model (Codex, Gemini, a different
+  Claude model) on a design question; **`quota-strategy`** stretches usage limits across overnight
+  runs, which multi-hour builds tend to become.
+
+### Bench hardware (public-skills, `hardware-lab`)
+
+For bring-up on real boards, alongside `fuchsia-hardware-bench`:
+
+- **`bus-pirate`**: probe, sniff, or bit-bang I2C, SPI, UART, 1-Wire, or JTAG/SWD on a board
+  under bring-up, and dump EEPROM or flash chips.
+- **`siglent-scope`**: remote-control a Siglent SDS1000X-E scope (screenshots, waveform pulls) to
+  check the signals a new driver produces.
+- **`cynthion-capture`** / **`cynthion-pcap-decode`**: capture and decode USB traffic, useful
+  when a Fuchsia USB driver misbehaves and you want to diff its traffic against Linux's.
+  **`cynthion-setup`** installs the tools first.
+- **`mcci-3411`**: a USB 3.2 loopback and compliance device for testing host controller drivers.
+
+### Engineering tools (public-skills, `dev-tools`)
+
+- **`review-swarm`**: adversarial multi-reviewer review of a diff before you send it for code
+  review.
+- **`dep-quality`**: score third-party libraries on evidence before adding one.
+
+Install either set the same way:
+
+```
+/plugin install hardware-lab@curtisg-skills
+/plugin install dev-tools@curtisg-skills
+```
 
 ## Installing in Antigravity
 

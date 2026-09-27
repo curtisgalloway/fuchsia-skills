@@ -32,7 +32,7 @@ concrete recommendation.
 - What does a bind library symbol expand to?
 
 Do NOT use this for Linux kernel / clean-room hardware questions — use `os-investigator` + `rpi-expert`
-for those (both in the `public-skills` repo). Do NOT use this for a simple "where is this
+for those (both in the `driver-lab` repo). Do NOT use this for a simple "where is this
 file / symbol defined" lookup — use `Explore`.
 
 ---
