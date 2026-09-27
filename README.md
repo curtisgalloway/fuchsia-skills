@@ -137,6 +137,35 @@ and CML routing actually work in the tree you're writing into.
   session), **`lab-notebook`** (running notes for a bring-up), **`handoff`** (carry state across a
   context clear), **`learn`** (capture lessons into instruction files),
   **`agent-agnostic-skills`** (write skills that survive a change of harness).
+  **`consult`** gets a second opinion from another agent or model (Codex, Gemini, a different
+  Claude model) on a design question; **`quota-strategy`** stretches usage limits across overnight
+  runs, which multi-hour builds tend to become.
+
+### Bench hardware (public-skills, `hardware-lab`)
+
+For bring-up on real boards, alongside `fuchsia-hardware-bench`:
+
+- **`bus-pirate`**: probe, sniff, or bit-bang I2C, SPI, UART, 1-Wire, or JTAG/SWD on a board
+  under bring-up, and dump EEPROM or flash chips.
+- **`siglent-scope`**: remote-control a Siglent SDS1000X-E scope (screenshots, waveform pulls) to
+  check the signals a new driver produces.
+- **`cynthion-capture`** / **`cynthion-pcap-decode`**: capture and decode USB traffic, useful
+  when a Fuchsia USB driver misbehaves and you want to diff its traffic against Linux's.
+  **`cynthion-setup`** installs the tools first.
+- **`mcci-3411`**: a USB 3.2 loopback and compliance device for testing host controller drivers.
+
+### Engineering tools (public-skills, `dev-tools`)
+
+- **`review-swarm`**: adversarial multi-reviewer review of a diff before you send it for code
+  review.
+- **`dep-quality`**: score third-party libraries on evidence before adding one.
+
+Install either set the same way:
+
+```
+/plugin install hardware-lab@curtisg-skills
+/plugin install dev-tools@curtisg-skills
+```
 
 ## Installing in Antigravity
 

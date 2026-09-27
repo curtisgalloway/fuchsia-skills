@@ -85,4 +85,8 @@ that [curtisgalloway/public-skills](https://github.com/curtisgalloway/public-ski
   `fuchsia-driver-bind-debug` hand off to these by name for board-specific hardware questions.
 - **Working style** (`agent-workflow`, from public-skills): `intern-mode` (stop and report rather
   than thrash, handy on long bring-up sessions), `design-partner`, `project-plan`, `handoff`,
-  `learn`.
+  `learn`, `consult` (a second opinion from another model).
+- **Bench hardware** (`hardware-lab@curtisg-skills`): `bus-pirate` (I2C/SPI/UART/JTAG probing),
+  `siglent-scope`, and the Cynthion USB capture and decode skills, for bring-up on real boards.
+- **Engineering tools** (`dev-tools@curtisg-skills`): `review-swarm` (adversarial review of a
+  diff before you send it for code review), `dep-quality`.
