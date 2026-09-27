@@ -1,6 +1,6 @@
 {
   "name": "fuchsia-skills",
-  "version": "1.0.0",
+  "version": "2026.927.0",
   "description": "Agent skills for the public Fuchsia tree: source checkout, the Gemini-to-Claude in-tree agent bridge, multi-workstream setup, deep source questions, driver bind debugging, and hardware bench/boot-test CI.",
   "author": {
     "name": "curtisgalloway",

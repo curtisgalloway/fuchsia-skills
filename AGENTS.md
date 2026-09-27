@@ -54,6 +54,13 @@ clearly in `SKILL.md`.
   (`intern-mode`, `handoff`, `learn`) live in `public-skills`. Name the repo when you reference
   them, so a reader who installed only this plugin knows where to look. Both install from the
   `curtisg-skills` marketplace that `public-skills` hosts.
+- **Bump the plugin version in every pull request.** Claude Code reinstalls a plugin only when
+  the `version` in `.claude-plugin/plugin.json` changes, and the whole repo is the plugin, so
+  every pull request runs `python3 utilities/plugin-version.py bump`. Versions are calendar
+  dates, `YYYY.MDD.N` (`2026.927.0`, then `2026.927.1` the same day; October 1 is `1001`).
+  Keep the version only in `plugin.json`, never in the `marketplace.json` entry. CI runs
+  `plugin-version.py check` and fails a pull request that skips the bump. The script is a copy
+  of the one in `public-skills`; change both together.
 
 ## License
 
