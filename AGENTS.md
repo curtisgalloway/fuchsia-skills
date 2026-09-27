@@ -48,9 +48,12 @@ clearly in `SKILL.md`.
   that it will drift.
 - **Cite the tree, not memory.** Prefer `//path/to/file.cc` references and public fuchsia.dev URLs
   over recalled behaviour.
-- **Cross-repo references.** Several skills hand off to skills that stayed in `public-skills`
-  (`os-investigator`, `rpi-expert`). Name the repo when you reference them, so a reader who
-  installed only this plugin knows where to look.
+- **Cross-repo references.** Several skills hand off to skills in other repos: the driver-porting
+  skills (`os-investigator`, `cleanroom-spec`, `rpi-expert`, and the other board experts) live in
+  [driver-lab](https://github.com/curtisgalloway/driver-lab); the working-style skills
+  (`intern-mode`, `handoff`, `learn`) live in `public-skills`. Name the repo when you reference
+  them, so a reader who installed only this plugin knows where to look. Both install from the
+  `curtisg-skills` marketplace that `public-skills` hosts.
 
 ## License
 

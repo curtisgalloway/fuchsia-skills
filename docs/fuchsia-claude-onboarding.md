@@ -59,21 +59,30 @@ In this repo — generically useful: `fuchsia-source` (deep source questions via
 one machine, `fx worktree`). Written against one specific hardware bench and best treated as
 templates for your own lab: `fuchsia-hardware-bench`, `fuchsia-boot-test-ci`.
 
-In [curtisgalloway/public-skills](https://github.com/curtisgalloway/public-skills), worth
-installing alongside this one:
+Not a skill, but worth running on any machine that keeps a tree:
+[curtisgalloway/fx-updater](https://github.com/curtisgalloway/fx-updater) runs `jiri update` and
+`fx build` on a systemd timer, skips the run if the tree has uncommitted work, and records each
+outcome. Pair it with the first habit above: its `--hook` can re-run the bridge after each update.
+
+Companion skills live in two other repos, both installed from the `curtisg-skills` marketplace
+that [curtisgalloway/public-skills](https://github.com/curtisgalloway/public-skills) hosts:
 
 ```
 /plugin marketplace add curtisgalloway/public-skills
-/plugin install public-skills@public-skills
+/plugin install driver-porting@curtisg-skills
+/plugin install agent-workflow@curtisg-skills
 ```
 
-- **Porting a driver into Fuchsia from a differently-licensed OS** — `os-investigator` (reads the
-  original source, returns hardware facts in original words, never code, each tagged by
+- **Porting a driver into Fuchsia from a differently-licensed OS** (`driver-porting`, from
+  [curtisgalloway/driver-lab](https://github.com/curtisgalloway/driver-lab)): `os-investigator`
+  (reads the original source, returns hardware facts in original words, never code, each tagged by
   provenance), `cleanroom-spec` (turns that into a complete implementation spec for one
   peripheral), `cleanroom-implementer` (the rules and audit for the agent that writes the Fuchsia
   driver from the spec). Pair with `fuchsia-source` for the target-side DFv2 / bind / CML question.
-- **Board experts** — `rpi-expert` (Pi 5, BCM2712 + RP1) and `indiedroid-nova-expert` (RK3588S) for
+- **Board experts** (also `driver-porting`): `rpi-expert` (Pi 5, BCM2712 + RP1), `rpi4-expert`
+  (Pi 4, BCM2711), `indiedroid-nova-expert` (RK3588S), and `pixel10-expert` (Tensor G5) for
   memory maps, boot chain, interrupts, clocks, and datasheet citations. `fuchsia-source` and
   `fuchsia-driver-bind-debug` hand off to these by name for board-specific hardware questions.
-- **Working style** — `intern-mode` (stop and report rather than thrash, handy on long bring-up
-  sessions), `design-partner`, `learn`, `wrapup`.
+- **Working style** (`agent-workflow`, from public-skills): `intern-mode` (stop and report rather
+  than thrash, handy on long bring-up sessions), `design-partner`, `project-plan`, `handoff`,
+  `learn`.
