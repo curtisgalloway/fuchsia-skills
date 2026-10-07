@@ -5,7 +5,7 @@ description: >-
   CML shard and bind routing, framework behavior behind runtime errors (ZX_ERR_PEER_CLOSED,
   ZX_ERR_NOT_FOUND, ZX_ERR_NOT_SUPPORTED), and working in-tree examples (PDev, serialimpl,
   composite) to model on. Use whenever the answer requires tracing Fuchsia source rather than
-  recalling it. Not for Linux/clean-room hardware questions (use os-investigator + rpi-expert) or
+  recalling it. Not for Linux/clean-room hardware questions (use cleanroom-investigator, or hardware-investigator + board-expert) or
   simple symbol lookups (use Explore). Returns the answer, the correct pattern, and path:line
   sources.
 ---
@@ -31,8 +31,9 @@ concrete recommendation.
 - What Zircon kernel API or constant should I use for X?
 - What does a bind library symbol expand to?
 
-Do NOT use this for Linux kernel / clean-room hardware questions — use `os-investigator` + `rpi-expert`
-for those (both in the `driver-lab` repo). Do NOT use this for a simple "where is this
+Do NOT use this for Linux kernel / clean-room hardware questions — use `cleanroom-investigator` (in the
+`cleanroom-skills` repo) for the clean-room case, or `hardware-investigator` + `board-expert` (in the
+`driver-lab` repo) when the answer may be cited. Do NOT use this for a simple "where is this
 file / symbol defined" lookup — use `Explore`.
 
 ---

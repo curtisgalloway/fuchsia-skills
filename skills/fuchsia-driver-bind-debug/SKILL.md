@@ -260,5 +260,5 @@ Two deprecations to know:
 ## When to hand off
 - Need to read the framework internals to understand a match (what property a parent *should* stamp,
   how a composite spec resolves) → **`fuchsia-source`**.
-- Board-specific node topology / which RP1 leaf advertises what → **`rpi-expert`** (in the `driver-lab` repo).
+- Board-specific node topology / which leaf device advertises what → **`board-expert`** (in the `driver-lab` repo), when the board has a spec; otherwise **`hardware-investigator`** (also `driver-lab`).
 - The driver matched and `start()` is what fails → **`fuchsia-source`** (this skill is match-only).

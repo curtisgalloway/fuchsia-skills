@@ -64,25 +64,33 @@ Not a skill, but worth running on any machine that keeps a tree:
 `fx build` on a systemd timer, skips the run if the tree has uncommitted work, and records each
 outcome. Pair it with the first habit above: its `--hook` can re-run the bridge after each update.
 
-Companion skills live in two other repos, both installed from the `curtisg-skills` marketplace
-that [curtisgalloway/public-skills](https://github.com/curtisgalloway/public-skills) hosts:
+Companion skills live in other repos. `driver-porting` and `agent-workflow` install from the
+`curtisg-skills` marketplace that [curtisgalloway/public-skills](https://github.com/curtisgalloway/public-skills)
+hosts; the clean-room skills have a marketplace of their own:
 
 ```
 /plugin marketplace add curtisgalloway/public-skills
 /plugin install driver-porting@curtisg-skills
 /plugin install agent-workflow@curtisg-skills
+/plugin marketplace add curtisgalloway/cleanroom-skills
+/plugin install cleanroom-skills@cleanroom-skills
 ```
 
-- **Porting a driver into Fuchsia from a differently-licensed OS** (`driver-porting`, from
-  [curtisgalloway/driver-lab](https://github.com/curtisgalloway/driver-lab)): `os-investigator`
-  (reads the original source, returns hardware facts in original words, never code, each tagged by
-  provenance), `cleanroom-spec` (turns that into a complete implementation spec for one
-  peripheral), `cleanroom-implementer` (the rules and audit for the agent that writes the Fuchsia
-  driver from the spec). Pair with `fuchsia-source` for the target-side DFv2 / bind / CML question.
-- **Board experts** (also `driver-porting`): `rpi-expert` (Pi 5, BCM2712 + RP1), `rpi4-expert`
-  (Pi 4, BCM2711), `indiedroid-nova-expert` (RK3588S), and `pixel10-expert` (Tensor G5) for
-  memory maps, boot chain, interrupts, clocks, and datasheet citations. `fuchsia-source` and
-  `fuchsia-driver-bind-debug` hand off to these by name for board-specific hardware questions.
+- **Porting a driver into Fuchsia from a differently-licensed OS** (`cleanroom-skills`, from
+  [curtisgalloway/cleanroom-skills](https://github.com/curtisgalloway/cleanroom-skills); needs
+  `driver-porting` installed too): `cleanroom-investigator` (reads the original source, returns
+  hardware facts in original words, never code, each tagged by provenance), `cleanroom-spec`
+  (turns that into a complete implementation spec for one peripheral), `cleanroom-verifier`
+  (re-checks a landed spec), `cleanroom-implementer` (the rules and audit for the agent that
+  writes the Fuchsia driver from the spec). Pair with `fuchsia-source` for the target-side
+  DFv2 / bind / CML question.
+- **Hardware facts and specs** (`driver-porting`, from
+  [curtisgalloway/driver-lab](https://github.com/curtisgalloway/driver-lab)): `peripheral-spec`
+  (a spec whose every fact cites its source lines, for code you may copy from), `board-expert`
+  (reads board specs: memory maps, boot chain, interrupts, clocks; no per-board expert ships
+  today), `hardware-investigator` (a hardware question answered as anchored facts), and
+  `spec-verifier`. `fuchsia-source` and `fuchsia-driver-bind-debug` hand off to these by name for
+  board-specific hardware questions.
 - **Working style** (`agent-workflow`, from public-skills): `intern-mode` (stop and report rather
   than thrash, handy on long bring-up sessions), `design-partner`, `project-plan`, `handoff`,
   `learn`, `consult` (a second opinion from another model).
