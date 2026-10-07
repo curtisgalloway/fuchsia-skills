@@ -81,53 +81,60 @@ Two habits here depend on it. Re-run `fuchsia-claude-setup` after the scheduled 
 the same tree should wait on fx-updater's lock rather than build over a `jiri update` in progress;
 its `docs/contract.md` says what is promised. `fx-updater --skill` prints its agent-facing usage.
 
-## Companion skills in driver-lab and public-skills
+## Companion skills in driver-lab, cleanroom-skills and public-skills
 
 These are not Fuchsia-specific, so they live elsewhere, but several of the skills here hand off
-to them by name. Both repos install from one marketplace, `curtisg-skills`, which
-[curtisgalloway/public-skills](https://github.com/curtisgalloway/public-skills) hosts:
+to them by name. `driver-porting` and `agent-workflow` install from one marketplace,
+`curtisg-skills`, which [curtisgalloway/public-skills](https://github.com/curtisgalloway/public-skills)
+hosts; the clean-room skills have a marketplace of their own:
 
 ```
 /plugin marketplace add curtisgalloway/public-skills
 /plugin install driver-porting@curtisg-skills
 /plugin install agent-workflow@curtisg-skills
+/plugin marketplace add curtisgalloway/cleanroom-skills
+/plugin install cleanroom-skills@cleanroom-skills
 ```
 
 `driver-porting` is served from
-**[curtisgalloway/driver-lab](https://github.com/curtisgalloway/driver-lab)**; `agent-workflow`
-from public-skills itself.
+**[curtisgalloway/driver-lab](https://github.com/curtisgalloway/driver-lab)**, `cleanroom-skills`
+from **[curtisgalloway/cleanroom-skills](https://github.com/curtisgalloway/cleanroom-skills)**
+(install driver-lab's plugin first; it needs it), and `agent-workflow` from public-skills itself.
 
-### Porting a driver into Fuchsia (driver-lab)
+### Porting a driver into Fuchsia (cleanroom-skills)
 
-Three skills compose into one pipeline for reimplementing a driver from a differently-licensed OS,
+Skills that compose into one pipeline for reimplementing a driver from a differently-licensed OS,
 splitting the work across contexts so encumbered source never reaches the agent that writes the new
 code:
 
-- **`os-investigator`**: reads the Linux/vendor source and returns hardware facts and mechanism
-  descriptions *in original words*, never source, with every fact tagged by provenance
+- **`cleanroom-investigator`**: reads the Linux/vendor source and returns hardware facts and
+  mechanism descriptions *in original words*, never source, with every fact tagged by provenance
   (databook / standard / device-tree / source-observed). Ships a mechanical leak scanner.
 - **`cleanroom-spec`**: orchestrates the above into a complete clean-room implementation spec for
-  one peripheral (Ethernet MAC, UART, SD/MMC, USB, I2C/SPI, …), and enforces the transfer protocol
+  one peripheral (Ethernet MAC, UART, SD/MMC, USB, I2C/SPI, ...), and enforces the transfer protocol
   and the provenance ledger.
 - **`cleanroom-implementer`**: the consumer side, with the rules, hooks, and audit procedure for
   the agent that turns that spec into Fuchsia driver code without ever having seen the original.
+- **`cleanroom-verifier`**: re-checks a landed clean-room spec's accuracy without breaching the
+  wall.
 
-For driver source you own (or may otherwise copy from), **`anchored-peripheral-spec`** produces
-the same spec shape without the wall: every fact carries a `file:line` anchor at a pinned commit
-so a reviewer can check the spec against the code. **`reference-driver-review`** reviews a driver
-against its reference, and **`spec-verifier`** checks a spec against the sources it cites.
+For driver source you own (or may otherwise copy from), **`peripheral-spec`** (driver-lab)
+produces the same spec shape without the wall: every fact carries a `file:line` anchor at a pinned
+commit so a reviewer can check the spec against the code. **`reference-driver-review`** reviews a
+driver against its reference, and **`spec-verifier`** checks a spec against the sources it cites.
 
 Pair these with **`fuchsia-source`** for the target-side question: how the DFv2 API, bind rules,
 and CML routing actually work in the tree you're writing into.
 
-### Board experts (driver-lab)
+### Board and hardware facts (driver-lab)
 
-- **`rpi-expert`** (Pi 5 / CM5, BCM2712 + RP1), **`rpi4-expert`** (Pi 4, BCM2711),
-  **`indiedroid-nova-expert`** (RK3588S), **`pixel10-expert`** (Pixel 10, Tensor G5): memory maps and MMIO
-  addresses, device tree, boot chain and exception-level hand-off, PSCI/SMP, interrupts, timers,
-  clocks/power, and which datasheet to cite. `fuchsia-source` and `fuchsia-driver-bind-debug`
-  both hand off to these for board-specific hardware questions. **`board-spec-scaffold`** starts a
-  new one for a board that has none.
+No per-board expert skills ship today (the Raspberry Pi, Indiedroid Nova and Pixel 10 experts were
+removed from driver-lab, which is being refilled with specs regenerated from public sources).
+**`board-expert`** reads board specs (memory maps, MMIO addresses, boot chain, interrupts,
+clocks, which datasheet to cite) for any board that has one; **`hardware-investigator`** answers a
+hardware question as facts anchored to sources a spec repository's license accepts;
+**`board-spec-scaffold`** starts a spec for a board that has none. `fuchsia-source` and
+`fuchsia-driver-bind-debug` hand off to these for board-specific hardware questions.
 
 ### Working-style skills (public-skills, `agent-workflow`)
 
