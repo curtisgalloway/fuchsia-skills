@@ -1,11 +1,12 @@
 ---
 name: fuchsia-multi-checkout
 description: >-
-  Run several Fuchsia workstreams (or several agents) on one machine without their builds, ffx
-  daemons, or target devices colliding. Use when setting up a second workstream, when fx/ffx picks
-  up the wrong tree or targets the wrong device, or on cross-tree symptoms (two emulators fighting,
-  a daemon on the wrong socket). Covers `fx worktree` (the current upstream mechanism), the two
-  conventions that prevent the real collisions, and the legacy separate-checkout setup.
+  Run several Fuchsia workstreams (or several agents) on one machine without their builds,
+  emulators, or target devices colliding. Use when setting up a second workstream, when fx/ffx
+  picks up the wrong tree or targets the wrong device, or on cross-tree symptoms (two emulators
+  fighting, a shell running another tree's tools). Covers `fx worktree` (the current upstream
+  mechanism, with the in-tree fx-worktree skill as its reference), the two conventions that
+  prevent the real collisions, and the legacy separate-checkout setup.
 ---
 
 <!--
@@ -16,56 +17,46 @@ SPDX-License-Identifier: Apache-2.0
 # fuchsia-multi-checkout — several Fuchsia workstreams on one machine
 
 Goal: several agents working different topics concurrently without stepping on each other's builds,
-ffx daemons, or target devices.
+emulators, or target devices.
 
 **Headline:** Fuchsia now ships **`fx worktree`** — first-class support for parallel workstreams
 backed by a pool of physical checkouts. Prefer it for new workstreams. Hand-managed separate
 checkouts still work and are still what most existing trees are; that path is documented near the
 end. Either way, the **two conventions** below are what actually prevent collisions.
 
-> Everything marked *verified* here was checked against a tree at integration `d952e26cd35`
-> (root `e9ab7c44481`, 2026-08-15). `fx worktree` landed between 2026-06 and 2026-08 — a tree older
-> than that will not have it, and `jiri update` is the prerequisite.
+> Verified against fuchsia 5ded3fc08ae, 2026-10-15 unless marked otherwise. `fx worktree` landed
+> between 2026-06 and 2026-08 — a tree older than that will not have it, and `jiri update` is the
+> prerequisite.
 
 ## `fx worktree` (preferred)
 
-Verified command surface — read from `tools/devshell/worktree/main.py`, not from the help text:
+**The command reference is upstream's, not ours.** Read the in-tree skill
+`//.agents/skills/fx-worktree/SKILL.md` (linked into Claude Code by `fuchsia-claude-setup`) and
+`//tools/devshell/worktree/README.md`. In brief: `fx worktree add <name>` leases a pool slot
+(provisioning one if the pool is empty, and syncing it by default), `locate`, `list`, and `remove`
+manage the task, and `fx worktree pool …` manages the physical checkouts. `add`, `list`, and
+`pool list` take `--json`.
 
-| Command | What it does |
-|---|---|
-| `fx worktree add <name>` | Lease a pool slot and expose it as `<name>`. Auto-provisions a new physical checkout if the pool is empty. Opts: `--sync`, `--pool-name <slot>`, `--json`. |
-| `fx worktree list` | Active worktrees and their git branches. |
-| `fx worktree locate <name>` | Absolute path to the worktree on disk (the *physical* slot). |
-| `fx worktree remove <name>` | Remove the worktree and return the slot to the pool. |
-| `fx worktree pool list` | Physical checkouts in the pool, with state and paths. |
-| `fx worktree pool add [name]` | Add a physical checkout. Opts: `--set '<args>'` (runs `fx set`), `--symlink-local` / `--copy-local` (bring the main checkout's `local/` dir across). |
-| `fx worktree pool remove <name> [--force]` | Delete a physical checkout. |
+What the upstream docs say less loudly:
 
-**Trap: the help text advertises commands that do not exist.** `tools/devshell/worktree.fx` lists
-`lease` and `release` in its header, and `fx worktree --help` omits `pool` from the command list.
-The argparse surface in `main.py` is authoritative: `pool`, `locate`, `list`, `add`, `remove` — there
-is no `lease`/`release`. Leasing happens implicitly inside `add`/`remove`.
-
-### Layout
-
-```
-$FUCHSIA_DIR/.jiri_root/worktrees/<name>   -> symlink to the pool slot
-$FUCHSIA_DIR/.jiri_root/worktrees/<slot>   physical checkout, auto-named e.g. "neat-thicket"
-$FUCHSIA_DIR/.jiri_root/worktrees_registry plain text, one physical slot path per line
-```
-
-`fx worktree add usb` creates the symlink `usb` → an adjective-noun slot name generated from a word
-list in `worktree_pool.py`. `fx` resolves through the symlink and bakes the **stable name** into
-build paths (`.jiri_root/worktrees/usb/out/...`), so the slot underneath can change without
-invalidating the build dir.
-
-Worktrees come up on **detached HEAD**, despite `add`'s argument help calling it
-"Name of worktree / branch". Create a branch yourself if you want one.
+- **The help text is stale.** `tools/devshell/worktree.fx` still lists `lease` and `release`, which
+  do not exist, and omits `pool` and `metrics`. The argparse surface in
+  `tools/devshell/worktree/main.py` is authoritative; leasing happens inside `add`/`remove`.
+- **Detached HEAD by design.** Slots stay on a detached HEAD synced to the parent's `JIRI_HEAD`,
+  despite `add`'s argument help calling the name "Name of worktree / branch"; `remove` detaches
+  again. Create a branch yourself if you need one.
+- **Slots keep `out/` across leases.** `add` backs up each `args.gn` and `remove` restores it, so
+  `fx set` changes made during a task do not survive into the next lease.
+- **`jiri update` does not move the worktrees.** Updating the main checkout leaves every slot on its
+  previous manifest revision; run `jiri worktree sync` inside the slot (or
+  `jiri worktree sync "$(fx worktree locate <name>)"`) to bring it along.
 
 ### Cost model — worktrees are about lifecycle, not disk
 
-*Verified:* a worktree does **not** share `prebuilt/` with the parent tree. The files are at
-different inodes and free space drops by the full amount.
+*Unverified since 2026-08:* a worktree was measured **not** sharing `prebuilt/` with the parent tree
+(different inodes, free space dropping by the full amount). The current upstream README says
+`jiri worktree add` "links CIPD prebuilts", so re-measure (`stat -c %i` on a prebuilt file in both
+trees, `df` before and after) before relying on the numbers below.
 
 | | Disk |
 |---|---|
@@ -73,15 +64,15 @@ different inodes and free space drops by the full amount.
 | Separate full checkout | ~44 GB+ (own prebuilt *and* own git objects) |
 
 Real savings, but ~30% — not the near-free duplication the layout suggests. **Choose `fx worktree`
-because one `jiri update` keeps every workstream on a consistent revision and slots are managed as a
-pool**, not to save space. The failure mode it fixes is N hand-maintained checkouts silently drifting
-to N different revisions.
+because every slot follows the main checkout's manifest (`jiri update`, then `jiri worktree sync` per
+slot) and slots are managed as a pool**, not to save space. The failure mode it fixes is N
+hand-maintained checkouts silently drifting to N different integration revisions.
 
 ### Workflow
 
 ```bash
 cd "$FUCHSIA_DIR"
-fx worktree add <topic>                       # provisions ~30 GB on first use — heavy
+fx worktree add <topic>                       # may provision a whole checkout — heavy
 cd "$(fx worktree locate <topic>)"            # or cd .jiri_root/worktrees/<topic>
 fx set <product>.<board> --debug --ccache
 fx set-device <device-or-emu>                 # NOT `ffx target default set`
@@ -91,7 +82,7 @@ fx build
 `fx set` and `fx build` behave normally inside a worktree; the build dir is an ordinary `out/` inside
 it. To retire a workstream: `fx worktree remove <topic>` returns the slot for reuse.
 
-**Claude Code users:** the agent bridge (`AGENTS.md` symlink, `.claude/skills/` farm) is
+**Claude Code users:** the agent bridge (the `.claude/skills/` farm) is
 git-excluded local state and does **not** come along into a new worktree or checkout — run
 `fuchsia-claude-setup` in each one.
 
@@ -118,17 +109,17 @@ so re-run `fx set-device` if you switch modes.
 
 ## Why it works (per-build-dir isolation)
 
-Already isolated per build dir — no action needed. *Citations reflect the tree as of 2026-06; verify
-if behaviour differs.*
+Already isolated per build dir — no action needed. *Verified against fuchsia 5ded3fc08ae, 2026-10-15;
+cited by file, since line numbers drift.* (The ffx daemon, which used to keep a per-build-dir socket,
+was removed upstream in 2026-08 — "[ffx] Remove the daemon from ffx", relanded 3abfd4fd3e6.)
 
 | Concern | Where | Source |
 |---|---|---|
-| Which tree `fx`/`ffx` act on | resolved from **cwd** (`.fx-root` walk); `$FUCHSIA_DIR` ignored; `$PATH`-invoked binary auto-redirects into the cwd's tree | `scripts/fx:188-228`, `src/developer/ffx/scripts/ffx` |
-| ffx daemon socket | `out/<dir>/.ffx-daemon/daemon.sock` | `config/src/paths.rs:87-99` |
-| ffx build config (product bundle, repo, qemu/sdk overrides) | `out/<dir>/ffx-config.json` | `config/.../context.rs:354-383` |
-| default target device | `out/<dir>.device` → `$FUCHSIA_NODENAME` | `tools/devshell/set-device`, `lib/vars.sh:444` |
-| default target resolution | `-t` flag, else `$FUCHSIA_DEVICE_ADDR`/`$FUCHSIA_NODENAME`; stateful `target.default` **bypassed** | `ffx/lib/target/src/lib.rs:690-714` |
-| build lock | `out/<dir>.build_lock` | `lib/vars.sh:500` |
+| Which tree `fx`/`ffx` act on | resolved from **cwd** (`.fx-root` walk); `$FUCHSIA_DIR` ignored; `$PATH`-invoked binary auto-redirects into the cwd's tree | `scripts/fx` (`find_tree_root`), `src/developer/ffx/scripts/ffx` |
+| ffx build config (product bundle, repo, qemu/sdk overrides) | `out/<dir>/ffx-config.json` | `src/developer/ffx/config/src/environment.rs`, `paths.rs` (`DEFAULT_BUILD_CONFIG_FILE`) |
+| default target device | `out/<dir>.device` → `$FUCHSIA_NODENAME` | `tools/devshell/set-device`, `tools/devshell/lib/vars.sh` |
+| default target resolution | `-t` flag, else `$FUCHSIA_DEVICE_ADDR`/`$FUCHSIA_NODENAME`; stateful `target.default` **bypassed** | `src/developer/ffx/lib/target/src/lib.rs` (fxbug.dev/394619603) |
+| build lock | `out/<dir>.build_lock` | `tools/devshell/lib/vars.sh` |
 
 The remaining single-tree assumption is the **shell environment**: a typical `~/.bashrc` pins one
 tree's `.jiri_root/bin` onto `PATH` and sources its `fx-env.sh`, so another shell inherits the wrong
@@ -154,10 +145,13 @@ pinned while another moves forward).
 | Command | What it does |
 |---|---|
 | `eval "$(fx-tree env)"` | Point the **current shell** at the tree your cwd is in: strips other trees' `.jiri_root/bin` from `PATH`, prepends this one's, sets `FUCHSIA_DIR`, adds an `[fx:<tree>]` prompt tag. **Still useful with worktrees** — this is the shell-env gap nothing else closes. |
-| `fx-tree doctor` | Diagnose multi-tree hazards (PATH/`FUCHSIA_DIR`, per-build-dir device + daemon, shared user-level default target, emulator-name collisions). |
-| `fx-tree list` | All checkouts under `$FX_TREE_ROOTS` (default `~/src`): build dir / device / daemon state. |
+| `fx-tree doctor` | Diagnose multi-tree hazards (PATH/`FUCHSIA_DIR`, per-build-dir device, shared user-level default target, emulator-name collisions). |
+| `fx-tree list` | All checkouts under `$FX_TREE_ROOTS` (default `~/src`): build dir and default device. |
 | `fx-tree new NAME [opts]` | **Superseded by `fx worktree add`** for new workstreams. Still the tool if you need a genuinely independent checkout. Dry-run by default; `--run` to execute. |
 | `fx-tree shim [DIR]` | Drop a `.envrc` (`eval "$(fx-tree env)"`) into a tree and git-exclude it (for direnv). |
+
+Upstream also ships `//tools/multifuchsia/` (README there), a long-standing alternative that clones
+checkouts as btrfs snapshots of a nightly-built clean tree; consider it if your disk is btrfs.
 
 ## What changed, and why the old advice was wrong
 
@@ -174,7 +168,10 @@ cost is ~30 GB rather than near-zero.
 
 - **Verify the command surface against the tree in front of you.** `worktree.fx`'s header and
   `--help` both disagree with the implemented subcommands; read `tools/devshell/worktree/main.py`.
-- `fx worktree add` provisions ~30 GB on first use — heavy, confirm-first. So is `fx-tree new --run`.
+- `fx worktree add` provisions a whole checkout when the pool is empty — heavy, confirm-first. So is
+  `fx-tree new --run`.
+- After `jiri update` in the main checkout, existing slots are still on the old revision until
+  `jiri worktree sync` runs in each one.
 - `fx worktree` requires a recent tree. On an older checkout the answer is `jiri update` first; before
   running it, sweep **every** project for local work (`jiri runp -show-name-prefix git status
   --porcelain`), not just the root repo — local commits and dirty files hide in `third_party/*`.

@@ -20,6 +20,16 @@ A coding agent is bringing up a DFv2 driver and it never starts. There is usuall
 unmatched node is a normal, expected outcome, so nothing is logged by default. This skill turns that
 silence into a diagnosis.
 
+**Start with the in-tree skill.** A Fuchsia checkout ships `debugging-driver-binding`
+(`//src/devices/skills/debug_driver_binding/SKILL.md`; linked into Claude Code by
+`fuchsia-claude-setup`). It is the baseline first stop: is the driver in the build, regular vs.
+composite, `doctor --driver` → `--composite-node-spec`, and — which this skill does not cover — how
+to hunt down the **parent driver** that should have added the node (FIDL service offers, legacy
+`BIND_PROTOCOL` values via `protodefs.h`, platform-bus/devicetree visitors), with a serial fallback
+via the in-tree `run-on-serial` skill. This skill is the **deeper ladder** for when that workflow
+leaves you with "the node exists, the driver is in the index, and it still did not match": the
+mis-pairing check, the composite blind spots in `doctor` and `bindc`, and the live match path.
+
 Canonical docs to read alongside this skill:
 - **Debug a driver when it fails to load** — https://fuchsia.dev/fuchsia-src/development/sdk/debug-driver-when-it-fails-to-load
 - **Driver binding (concepts)** — https://fuchsia.dev/fuchsia-src/concepts/drivers/driver_binding
@@ -74,7 +84,7 @@ ffx driver show <driver-name-or-url-substring>     # positional; partial matches
 ```
 
 The output is the **disassembled bind bytecode as `driver_index` on the target holds it** — one block
-per parent node, with primary and optional parents labelled, and (for a driver that did bind) the node
+per parent node, with primary and optional parents labeled, and (for a driver that did bind) the node
 it matched. Accept lists render as `Jump if <key> == <value> to ??` … `Abort` … `Label ??`, with
 values in **decimal**.
 
@@ -131,9 +141,13 @@ Matching primary node...
     Unconditional Abort reached in bind rules.
 ```
 
-**What to pass it, on x64.** The x86 board driver publishes **one composite node spec per PCI
-function, named for its BDF with underscores** — `00_1f_3` for `00:1f.3`. So on x64 the *spec*, not
-the node, is the unit of triage. The spec's **parent count also tells you whether an ACPI companion
+**What to pass it, on x64.** The **PCI bus driver** publishes **one composite node spec per PCI
+function, named for its BDF with underscores** — `00_1f_3` for `00:1f.3`
+(`src/devices/pci/drivers/pci/device.cc:321`, format `"%02x_%02x_%01x"`). It skips that spec when
+the PCI device is described by a devicetree (`has_devicetree()`, same file, ~line 302), so BDF-named
+specs are an **x64/ACPI** thing; on devicetree boards look for the devicetree's own composite
+instead. On x64 the *spec*, not the node, is the unit of triage. (Verified against fuchsia
+5ded3fc08ae, 2026-10-15.) The spec's **parent count also tells you whether an ACPI companion
 exists**: two parents (PCI plus ACPI, correlated by `fuchsia.BIND_PCI_TOPO`) means an
 `optional parent "acpi"` clause has something to bind to; one parent means PCI only, so an ACPI-keyed
 condition can never be satisfied there. Enumerate them with:
@@ -153,7 +167,13 @@ parent never stamped, or a value that differs from what the bind rule assumed.
 ffx driver list-devices --unbound      # only the nodes that failed to bind (-u)
 ffx driver list-devices -v             # all nodes WITH their bind properties (-v / --verbose)
 ffx driver dump                        # full node topology for context
+ffx driver node list -v --only unbound # nodes with state + bound driver URL; also ancestors:<n>, siblings:<n>, ...
+ffx driver node show <moniker-or-url>  # one node: properties + offered services (partial match)
+ffx driver node graph                  # topology as a graph
 ```
+
+`node list` / `node show` are the newer node-centric views and what the in-tree skill uses;
+`list-devices -v` is still present (not deprecated) and is the quickest dump of every property bag.
 
 Read the node's property bag and check **every** bind rule against it — a bind program matches only if
 *all* conditions are true. A single missing/renamed property key (very common when a parent driver
@@ -184,10 +204,11 @@ bindc debug <rules>.bind -d <device>.dev -i <includes>.bind
 **`bindc debug` cannot read composite bind rules.** Point it at a composite `.bind` file and it fails
 at *parse* time with ``[E027]: Expected 'true' keyword.``, echoing the file back. The gap is in the
 tool, not the library: `Command::Debug` calls `compiler::compile_bind` — the non-composite entry point
-— even though `compile_bind_composite` sits right next to it (`tools/bindc/src/main.rs:209-216`;
-`src/devices/lib/bind/src/compiler/compiler.rs:234,258`), and `offline_debugger::debug_from_str` takes
+— even though `compile_bind_composite` sits right next to it (`tools/bindc/src/main.rs:204-207`;
+`src/devices/lib/bind/src/compiler/compiler.rs:235,259`), and `offline_debugger::debug_from_str` takes
 a single `BindRules` with no composite handling
-(`src/devices/lib/bind/src/debugger/offline_debugger.rs:112-124`). Since essentially every modern
+(`src/devices/lib/bind/src/debugger/offline_debugger.rs:112-124`). (Line numbers verified against
+fuchsia 5ded3fc08ae, 2026-10-15; they drift.) Since essentially every modern
 PCI/ACPI driver is a composite, **this rung does not work out of the box on the drivers you are most
 likely to be debugging.**
 
@@ -247,18 +268,30 @@ severity (rung 3) is the longitudinal signal**, not tracing.
 ## Quick reference — verified `ffx driver` subcommands
 
 `show`, `doctor`, `list`, `list-devices` (`-v`, `--unbound`/`-u`), `composite list`/`composite show`,
-`dump`, `restart`, `disable`/`enable`, `test-node`, `node`, `list-hosts`, `list-composites`,
-`register`, `host`. (Verified present in `src/devices/bin/driver_tools/src/subcommands`.)
+`node list`/`node show`/`node graph`/`node add`/`node remove`, `host list`/`host show`, `dump`,
+`restart`, `disable`/`enable`, `test-node`, `register`, and the deprecated `list-hosts`,
+`list-composites`, `list-composite-node-specs`. (Verified present in
+`src/devices/bin/driver_tools/src/subcommands` at fuchsia 5ded3fc08ae, 2026-10-15.)
 
-Two deprecations to know:
+Deprecations to know — all still work today, with a warning:
 - **`ffx driver list-composite-node-specs` is deprecated** — it prints ``WARNING: This command is
   deprecated. Use `ffx driver composite list` or `ffx driver composite show` instead.``
   (`.../subcommands/list_composite_node_specs/mod.rs:22`). It still works today.
-- **`ffx driver list -v` is deprecated** in favour of `ffx driver show`
+- **`ffx driver list -v` is deprecated** in favor of `ffx driver show`
   (`.../subcommands/list/args.rs`).
+- **`ffx driver list-composites` is deprecated** in favor of `ffx driver composite list`
+  (`.../subcommands/list_composites/mod.rs:21`).
+- **`ffx driver list-hosts` is deprecated** in favor of `ffx driver host list`
+  (`.../subcommands/list_hosts/mod.rs:18`).
 
 ## When to hand off
 - Need to read the framework internals to understand a match (what property a parent *should* stamp,
   how a composite spec resolves) → **`fuchsia-source`**.
-- Board-specific node topology / which leaf device advertises what → **`board-expert`** (in the `driver-lab` repo), when the board has a spec; otherwise **`hardware-investigator`** (also `driver-lab`).
+- First pass, or the missing node's **parent driver** needs finding → the in-tree
+  **`debugging-driver-binding`** skill.
+- Board-specific node topology / which leaf device advertises what → **`board-expert`** (in the
+  `curtisgalloway/driver-lab` repo, `driver-porting` plugin — unrelated to Fuchsia's in-tree
+  `driver-lab` skill), when the board has a spec; otherwise **`hardware-investigator`** (same repo).
+- Live register state of a node or bound driver → Fuchsia's in-tree **`driver-lab`** skill
+  (`//src/devices/skills/driver-lab`, the `lab_proxy` / `driver_lab_rust` probing tool).
 - The driver matched and `start()` is what fails → **`fuchsia-source`** (this skill is match-only).

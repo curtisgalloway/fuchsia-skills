@@ -37,8 +37,10 @@ behave oppositely.**
 | **`bringup_with_tests.<board>`** | the `runtests` image | **Runs nothing.** Boots to a console shell and idles indefinitely | Active: type `runtests` at the shell |
 
 `bringup_with_tests` has **no `zircon.autorun.boot`** in its ZBI cmdline. Upstream infra drives it
-remotely over netsvc; if you just boot it and wait, a completely healthy board looks exactly like a
-hang. Verify what any image will do *before* wiring a runner around it:
+over the **serial console**: `tools/testing/testrunner/tester.go` (`FuchsiaSerialTester`) waits for
+`Bootup completed`, then types one `runtests -i <timeout> <path>` per test (see section 2). If you
+just boot it and wait, a completely healthy board looks exactly like a hang. Verify what any image
+will do *before* wiring a runner around it:
 
 ```sh
 # from a Fuchsia checkout: out/<build>/host_x64/zbi
@@ -56,6 +58,13 @@ to a multi-hour sweep:
 zbi -tv <fuchsia.zbi> | grep -oE 'test/[A-Za-z0-9_.-]+' | sort -u
 ```
 
+Once the shell is up, `runtests --all -d` (dry run) prints the list the image would actually run,
+which beats grepping the ZBI.
+
+For passive boot tests, upstream's own watcher is `//tools/testing/seriallistener`: the
+`boot_test()` template in `//build/testing/boot_tests/boot_test.gni` wraps it to wait for the
+success marker on the serial log. Read it before writing your own.
+
 ## 2. Driving `runtests` over the console shell
 
 With `console.shell=true`, the serial console is a shell. The sequence:
@@ -72,6 +81,29 @@ With `console.shell=true`, the serial console is a shell. The sequence:
 takes the whole suite with it, and you learn nothing. With it, the hang is reported as one failed
 test. (A `c11-condvar` test is a known offender.)
 
+Other `runtests` flags worth knowing (from its usage text in
+`//zircon/system/ulib/runtests-utils/discover-and-run-tests.cc`):
+
+- `-d` — dry run: print the test paths and exit.
+- `-n <names>` / `--names` — filter the default globs by basename (comma-separated list).
+- `-o <dir>` — also write a JSON `summary.json` (schema:
+  `//zircon/system/ulib/runtests-utils/summary-schema.json`). This is only useful if you can read
+  files back off the target. Over a serial-only link, the console text is all you get.
+
+In-kernel unit tests are not run by `runtests`. Use **`k ut all`** at the shell. They print their
+own `SUMMARY: Ran N test cases: M failed` (see section 4).
+
+### The route that avoids parsing SUMMARY: one test per invocation
+
+This is what upstream infra does. Send one `runtests -i <secs> /boot/test/<name>` per test. Wait
+for that test's own `[runtests][PASSED] <path>` or `[runtests][FAILED] <path>` mark, then send the
+next one. Start is signaled by `RUNNING TEST: <path>`. The signatures are in
+`//tools/testing/runtests/output.go`, and `TestPassed` there matches the named mark. A nested
+SUMMARY from inside a test can't be mistaken for the run's result, because nothing reads SUMMARY at
+all. A missing mark for the test you just launched means INCOMPLETE, not FAIL. The cost is one
+prompt round-trip per test, plus maintaining the test list yourself (`runtests --all -d` gives it
+to you).
+
 ## 3. Completion is `SUMMARY` **plus** the prompt — never `SUMMARY` alone
 
 Individual test binaries emit **their own nested** `SUMMARY: Ran N tests: M failed` lines partway
@@ -81,6 +113,9 @@ line — observed with a runtests self-test printing `SUMMARY: Ran 2 tests: 1 fa
 Wait until the trailing shell prompt returns, then let the **last** SUMMARY in the window win:
 
 ```python
+# An idle prompt is a line holding *only* the prompt.
+PROMPT_LINE_RE = re.compile(r"(?m)^\$[ \t]*$")
+
 def suite_finished(window: str) -> bool:
     if "SUMMARY: Ran " not in window:
         return False
@@ -88,11 +123,20 @@ def suite_finished(window: str) -> bool:
     return bool(lines) and bool(PROMPT_LINE_RE.search(lines[-1]))
 ```
 
+**Anchor the prompt to a whole line.** Searching for a bare `$` anywhere was a real defect.
+`runtests` streams each test's stdout to the console, so a dollar sign in test output (an
+environment dump, a shell test, a `$(...)` in a log line) closes the window early. Whichever SUMMARY
+came before it then becomes the verdict. runtests' own fixtures print a nested
+`SUMMARY: Ran 2 tests: 1 failed` well before the real summary, so that truncation scores a false
+FAIL. The mirror case is a nested zero-failure SUMMARY, then a `$`, then a real failure, which
+scores a false PASS.
+
 The same trap has a passive-capture form: on standalone boot-test images the overall `SUMMARY` can
-print **tens of seconds before** the authoritative success marker. Treating SUMMARY as
-end-of-capture truncates the log just short of the marker and reports INCOMPLETE on a healthy run.
-Only the success marker should end a capture immediately; anything else should start a settle
-window and keep reading.
+print **tens of seconds before** the success marker. Treating SUMMARY as end-of-capture truncates
+the log just short of the marker and reports INCOMPLETE on a healthy run. On a standalone boot-test
+image, the success marker can end a capture, because the image shuts down after printing it. On
+anything that keeps running afterward, such as a `k ut all` session, the marker is just another
+claimant (section 4). Any other signature should start a settle window and keep reading.
 
 ## 4. Parsing: precedence, and phrasings that bite
 
@@ -102,16 +146,51 @@ Signatures worth matching:
 - overall: `SUMMARY: Ran <N> tests: <M> failed (<sec> sec)`
 - **also seen:** `SUMMARY: Ran 1 test case: 0 failed` — a regex of `Ran\s+\d+\s+tests?:` cannot span
   the ` case`, so a clean run silently parses as INCOMPLETE. Accept an optional ` case`/` cases`.
-- standalone boot tests: a single fixed `***Boot-test-successful!-<base64>***` marker, emitted only
-  if the test process exited zero. Authoritative on its own.
+  That form comes from the kernel's `ut` command (`//zircon/kernel/lib/unittest/console.rs`), which
+  lists failures under **`The following test cases failed:`**. runtests uses
+  `The following tests failed:`. Match both headers.
+- standalone boot tests: a single fixed `***Boot-test-successful!-<base64>***` marker
+  (`boot_test_success_string` in `//build/testing/boot_tests/boot_test.gni`). Userboot prints it
+  only if the test process exited zero. It is **not** authoritative on its own (see below).
 
-**Precedence:** the overall SUMMARY wins over per-suite marks. This matters more than it sounds,
-because **`runtests --all` legitimately logs `[runtests][FAILED]`** from
+**Precedence: the last claimant printed wins.** Three kinds of line can each claim to be the
+run's result, and one capture can contain all three: a SUMMARY line (from `runtests` or `k ut`),
+the boot-test success marker, and a failure list or `[runtests][FAILED]` mark. Rank them by
+**position**, not kind:
+
+1. Marker printed after every SUMMARY and every failure signal → **PASS**.
+2. Otherwise, if any SUMMARY exists, the **last** one decides: PASS iff `failed == 0` and `ran > 0`.
+   A failure list printed right after it is that SUMMARY's own detail, not a contradiction.
+3. No SUMMARY and no later marker, but a `[runtests][FAILED]` mark or failure-list header → **FAIL**.
+4. Anything else → **INCOMPLETE**. That includes a log full of `[runtests][PASSED]` marks with no
+   SUMMARY. Those marks are printed once per test binary as it finishes, so a run that panics at
+   test 45 of 90 leaves about 44 PASSED marks and nothing else. Scoring that PASS is the worst
+   error a parser can make. Keep the marks as diagnostics only.
+
+Both orderings were real bugs:
+
+- **False PASS (marker-wins).** A `k ut all` run on a console-enabled kernel executed the console
+  self-test `command_boot_test_success_test`. That test drove the `boot-test-success` shell
+  command, which printed the **real** success marker mid-run. `SUMMARY: Ran 149 test cases: 1
+  failed` followed. Letting the marker win scored a failing run PASS. Upstream fixed the test
+  on 2026-09-21 (fuchsia `7897c4d732d`; `//zircon/kernel/lib/console/tests/mod.rs` now prints
+  `***Mock-boot-test-successful!***`). **Trees older than that still emit the real marker.**
+  Position precedence handles both.
+- **False FAIL (any-SUMMARY-wins).** A standalone boot test printed a per-binary SUMMARY with
+  failures partway through, then exited zero and printed the marker last. The marker is later, so
+  it decides.
+
+The fixtures make this matter even more, because **`runtests --all` legitimately logs
+`[runtests][FAILED]`** from
 `/boot/test/sys/runtests-utils-testdata/…` — fixtures deliberately built to fail so runtests can
 prove it detects failure. A healthy full sweep therefore contains real FAILED lines and a
 `The following tests failed:` header while the overall result is `0 failed`. Curate those paths out
 (or keep an expected-fail list) before this gates anything; a runner that ranks per-suite marks
-above SUMMARY will report a spurious FAIL forever.
+above SUMMARY will report a spurious FAIL forever. Their nested FAILED lines come *before* the real
+SUMMARY, so position precedence gets this right.
+
+Paths, signatures and line formats in this skill were verified against fuchsia 5ded3fc08ae,
+2026-10-15. Upstream moves, so expect them to drift.
 
 Distinguish **INCOMPLETE** from FAIL: no evidence either way (boot hang, crash, truncated capture)
 is not a test failure. Keep it a separate outcome so the harness can retry instead of filing a
