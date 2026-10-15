@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 # Claude Code for Fuchsia developers
 
 Agent skills for working on the public [Fuchsia](https://fuchsia.dev) tree: checking out the
-source, bridging the tree's Gemini-oriented agent content into Claude Code, running several
+source, bridging the tree's in-tree skills into Claude Code, running several
 workstreams on one machine, answering deep source questions, debugging driver binding, and driving
 real hardware.
 
@@ -38,7 +38,7 @@ Full walkthrough: [docs/fuchsia-claude-onboarding.md](docs/fuchsia-claude-onboar
 | Skill | Use it when |
 |---|---|
 | **`fuchsia-checkout`** | You have no tree yet. Drives the bootstrap end to end, including the multi-hour steps that need to run in the background and the `.gitcookies` auth failure on anonymous checkouts. |
-| **`fuchsia-claude-setup`** | Right after the checkout, and again after every `jiri update`. Bridges the tree's Gemini-oriented agent content into Claude: `AGENTS.md → GEMINI.md` symlinks, a generated `.claude/skills/` farm over all ~80 in-tree skills, and `.git/info/exclude` entries so nothing leaks into fuchsia.git. |
+| **`fuchsia-claude-setup`** | Right after the checkout, and again after every `jiri update`. Bridges the tree's in-tree skills into Claude: a generated `.claude/skills/` farm over all of them (95 tracked `SKILL.md` files at fuchsia `5ded3fc08ae`, 2026-10-15), and `.git/info/exclude` entries so nothing leaks into fuchsia.git. The tree's `AGENTS.md` files need no bridge; Claude Code reads them natively. |
 | **`fuchsia-multi-checkout`** | You want a second workstream (or a second agent) on one machine without builds, `ffx` daemons, or target devices colliding. Covers `fx worktree`. Note the bridge above is local state — re-run it in each worktree. |
 
 **Antigravity users:** you don't need `fuchsia-claude-setup`. Its workspace skills directory is
@@ -81,7 +81,7 @@ Two habits here depend on it. Re-run `fuchsia-claude-setup` after the scheduled 
 the same tree should wait on fx-updater's lock rather than build over a `jiri update` in progress;
 its `docs/contract.md` says what is promised. `fx-updater --skill` prints its agent-facing usage.
 
-## Companion skills in driver-lab, cleanroom-skills and public-skills
+## Companion skills in curtisgalloway/driver-lab, cleanroom-skills and public-skills
 
 These are not Fuchsia-specific, so they live elsewhere, but several of the skills here hand off
 to them by name. `driver-porting` and `agent-workflow` install from one marketplace,
@@ -100,6 +100,10 @@ hosts; the clean-room skills have a marketplace of their own:
 **[curtisgalloway/driver-lab](https://github.com/curtisgalloway/driver-lab)**, `cleanroom-skills`
 from **[curtisgalloway/cleanroom-skills](https://github.com/curtisgalloway/cleanroom-skills)**
 (install driver-lab's plugin first; it needs it), and `agent-workflow` from public-skills itself.
+
+`curtisgalloway/driver-lab` is unrelated to the in-tree Fuchsia skill also named `driver-lab`
+(`//src/devices/skills/driver-lab`), which drives the `lab_proxy` driver to probe live hardware.
+The first writes and verifies hardware specs; the second pokes registers on a running target.
 
 ### Porting a driver into Fuchsia (cleanroom-skills)
 
@@ -126,7 +130,7 @@ driver against its reference, and **`spec-verifier`** checks a spec against the 
 Pair these with **`fuchsia-source`** for the target-side question: how the DFv2 API, bind rules,
 and CML routing actually work in the tree you're writing into.
 
-### Board and hardware facts (driver-lab)
+### Board and hardware facts (curtisgalloway/driver-lab)
 
 No per-board expert skills ship today (the Raspberry Pi, Indiedroid Nova and Pixel 10 experts were
 removed from driver-lab, which is being refilled with specs regenerated from public sources).

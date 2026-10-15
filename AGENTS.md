@@ -10,8 +10,9 @@ SPDX-License-Identifier: Apache-2.0
 Agent skills for working on the public Fuchsia tree. Split out of
 [public-skills](https://github.com/curtisgalloway/public-skills) so that Fuchsia developers can
 install just this set. Skills here are written primarily for Claude Code — the setup skills exist
-because fuchsia.git ships Gemini-oriented agent config that Claude does not read — but the
-non-setup skills are agent-neutral.
+because Claude Code does not discover fuchsia.git's in-tree skills on its own (it does read the
+tree's `AGENTS.md` files natively, since upstream renamed them from `GEMINI.md` on 2026-10-01) —
+but the non-setup skills are agent-neutral.
 
 ## Privacy rules — read before committing
 
@@ -50,11 +51,15 @@ clearly in `SKILL.md`.
   over recalled behaviour.
 - **Cross-repo references.** Several skills hand off to skills in other repos: the driver-porting
   skills (`peripheral-spec`, `board-expert`, `hardware-investigator`) live in
-  [driver-lab](https://github.com/curtisgalloway/driver-lab); the clean-room skills
+  [curtisgalloway/driver-lab](https://github.com/curtisgalloway/driver-lab) (the
+  `driver-porting` plugin); the clean-room skills
   (`cleanroom-investigator`, `cleanroom-spec`, `cleanroom-implementer`) live in
   [cleanroom-skills](https://github.com/curtisgalloway/cleanroom-skills); the working-style skills
   (`intern-mode`, `handoff`, `learn`) live in `public-skills`. Name the repo when you reference
-  them, so a reader who installed only this plugin knows where to look. Both install from the
+  them, so a reader who installed only this plugin knows where to look. Always write
+  "`curtisgalloway/driver-lab`", never a bare "driver-lab": since 2026-10-01 fuchsia.git has its
+  own, unrelated in-tree skill named `driver-lab` (`//src/devices/skills/driver-lab`, the
+  `lab_proxy` live-probing tool), and `fuchsia-claude-setup` links it into every session. Both install from the
   `curtisg-skills` marketplace that `public-skills` hosts.
 - **Bump the plugin version in every pull request.** Claude Code reinstalls a plugin only when
   the `version` in `.claude-plugin/plugin.json` changes, and the whole repo is the plugin, so

@@ -22,7 +22,7 @@ fuchsia.dev/fuchsia-src/get-started/). This skill encodes that flow **plus the a
 gotchas**. If this skill and the docs in the fetched tree disagree, the tree's docs win — re-read
 them once the checkout exists.
 
-> Verified against the docs as of 2026-08. Linux x64 is the supported host path (`apt`-based
+> Verified against the docs in fuchsia 5ded3fc08ae, 2026-10-15. Linux x64 is the supported host path (`apt`-based
 > instructions; the preflight tool is x64-only). For anything else, read the docs first rather
 > than improvising.
 
@@ -30,7 +30,9 @@ them once the checkout exists.
 
 - **Disk:** require ~100 GB free on the target filesystem (`df -h <parent-dir>`). The checkout
   alone is ~45 GB (25 GB of that is `prebuilt/`); the first build adds tens of GB more. Stop and
-  tell the user if it isn't there.
+  tell the user if it isn't there. (The docs quote "about 2 GB" to download the source plus 80 to
+  90 GB to build — `get_fuchsia_source.md`, verified against fuchsia 5ded3fc08ae, 2026-10-15; the
+  45 GB is a measured checkout including prebuilts, so budget by it.)
 - **Destination:** the bootstrap creates a `fuchsia/` directory **under the cwd it runs in**. Run
   it from the intended parent (e.g. `~/src`), never from inside another git repo.
 - **Prereqs:** `curl`, `file`, `unzip`, and `git` ≥ 2.31 — `sudo apt install curl file git unzip`
@@ -110,9 +112,10 @@ for the reasoning; `--ccache` requires ccache installed.
 - Emulator: follow `//docs/get-started/set_up_femu.md`; the in-tree `manage-emulator` skill
   covers start/stop once the bridge below is installed. If the machine will ever host a second
   tree, pass a unique `--name` from day one.
-- **Run `fuchsia-claude-setup` now.** The fresh tree ships ~80 in-tree agent skills and its
-  project instructions in GEMINI.md, with no AGENTS.md — Claude Code sees none of it until that
-  bridge exists. Checkout without the bridge is half a setup.
+- **Run `fuchsia-claude-setup` now.** The fresh tree's project instructions are in `AGENTS.md`,
+  which Claude Code loads natively, but its ~95 in-tree agent skills (verified against fuchsia
+  5ded3fc08ae, 2026-10-15) are invisible to Claude Code until that bridge exists. Checkout without
+  the bridge is half a setup.
 
 ## Note for the agent
 

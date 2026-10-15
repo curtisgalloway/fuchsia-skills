@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Curtis Galloway
 #
-# Background (verified against the fuchsia tree, 2026-06):
+# Background (verified against fuchsia 5ded3fc08ae, 2026-10-15):
 #   * `fx` and `ffx` already pick the checkout from your *current directory*
 #     (they walk up for `.fx-root` and deliberately IGNORE $FUCHSIA_DIR), and a
 #     $PATH-invoked `fx`/`ffx` auto-redirects into the tree your cwd is in.
-#   * The ffx daemon socket, build config, default device, and build lock are
-#     ALL already per-build-dir in "in-tree" mode:
-#         out/<dir>/.ffx-daemon/daemon.sock     (daemon, per build dir)
+#   * The ffx build config, default device, and build lock are ALL already
+#     per-build-dir in "in-tree" mode (the ffx daemon, which used to keep a
+#     per-build-dir socket, was removed upstream in 2026-08):
 #         out/<dir>/ffx-config.json             (product bundle / repo / sdk)
 #         out/<dir>.device                       (default target, per build dir)
 #         out/<dir>.build_lock                   (build lock, per build dir)
@@ -83,17 +83,6 @@ tree_device() {
   [[ -f $bd.device ]] && { tr -d '\n' <"$bd.device"; printf '\n'; }
 }
 
-# Print "running"/"stale"/"-" for a tree's per-build-dir daemon.
-tree_daemon_state() {
-  local bd; bd=$(tree_build_dir "$1") || { printf '%s\n' '-'; return; }
-  local pidf="$bd/.ffx-daemon/daemon.pid"
-  if [[ -f $pidf ]]; then
-    local pid; pid=$(tr -dc '0-9' <"$pidf")
-    if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then printf 'running(%s)\n' "$pid"
-    else printf 'stale\n'; fi
-  else printf '%s\n' '-'; fi
-}
-
 ffx_user_default_target() {
   [[ -f $FFX_USER_CONFIG ]] || return 1
   # Best-effort extraction without requiring jq.
@@ -146,14 +135,13 @@ cmd_doctor() {
   local name=${root##*/} ok=1
   printf '%sTree:%s        %s (%s)\n' "$c_dim" "$c_off" "$name" "$root"
 
-  local bd dev dstate
+  local bd dev
   if bd=$(tree_build_dir "$root"); then
     printf 'Build dir:    %s\n' "${bd#$root/}"
   else
     warn 'Build dir:    (none — run `fx set …`)'
   fi
   dev=$(tree_device "$root"); printf 'Default dev:  %s\n' "${dev:-(unset; use \`fx set-device\`)}"
-  dstate=$(tree_daemon_state "$root"); printf 'Daemon:       %s\n' "$dstate"
 
   echo
   printf '%sShell:%s\n' "$c_dim" "$c_off"
@@ -223,15 +211,14 @@ cmd_list() {
     warn "(set FX_TREE_ROOTS to override the search roots)"
     return 0
   fi
-  printf '%-22s %-26s %-22s %s\n' 'TREE' 'BUILD DIR' 'DEVICE' 'DAEMON'
-  local t bd dev ds here
+  printf '%-22s %-26s %s\n' 'TREE' 'BUILD DIR' 'DEVICE'
+  local t bd dev here
   here=$(find_tree_root "$PWD" 2>/dev/null)
   for t in "${found[@]}"; do
     bd=$(tree_build_dir "$t" 2>/dev/null); bd=${bd#$t/}
     dev=$(tree_device "$t" 2>/dev/null)
-    ds=$(tree_daemon_state "$t" 2>/dev/null)
     local mark=' '; [[ $t == "$here" ]] && mark='*'
-    printf '%s%-21s %-26s %-22s %s\n' "$mark" "${t##*/}" "${bd:-—}" "${dev:-—}" "$ds"
+    printf '%s%-21s %-26s %s\n' "$mark" "${t##*/}" "${bd:-—}" "${dev:-—}"
   done
   [[ -n $here ]] && printf '%s* = your current tree%s\n' "$c_dim" "$c_off"
 }
@@ -333,7 +320,7 @@ USAGE
   eval "\$($PROG env [DIR])"   Point THIS shell at the tree containing DIR (cwd).
                               Fixes PATH (.jiri_root/bin), FUCHSIA_DIR, prompt tag.
   $PROG doctor [DIR]          Diagnose multi-tree hazards for a tree.
-  $PROG list                  List all checkouts (build dir / device / daemon).
+  $PROG list                  List all checkouts (build dir / device).
   $PROG new NAME [opts]       Scaffold a new sibling checkout (dry-run by default).
       --branch B  --root DIR  --reference TREE  --cache DIR  --partial  --run
   $PROG shim [DIR]            Drop a .envrc shim into a tree (git-excluded).

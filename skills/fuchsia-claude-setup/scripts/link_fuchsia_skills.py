@@ -5,17 +5,15 @@
 link_fuchsia_skills.py - bridge a Fuchsia checkout's in-tree agent config
 into Claude Code's conventions.
 
-Upstream fuchsia.git ships its agent guidance in Gemini-oriented locations:
-project instructions in GEMINI.md files and ~80 skills spread across the
-tree (//.agents/skills/ plus per-team dirs), discovered via skills.json /
-`fx manage-skills` - none of which Claude Code reads. This script builds the
-local, git-excluded bridge:
+Upstream fuchsia.git ships its project instructions in AGENTS.md (read
+natively by Claude Code) but its ~95 skills are spread across the tree
+(//.agents/skills/ plus per-team skills/, .agents/skills/ and .agent/skills/
+dirs) and discovered only via Gemini's skills.json / `fx manage-skills`.
+This script builds the local, git-excluded bridge:
 
   1. .claude/skills/<name> symlinks for every tracked SKILL.md, named by
      each skill's frontmatter `name:` (falling back to a path-derived slug)
-  2. AGENTS.md -> GEMINI.md symlinks at the root and beside every nested
-     tracked GEMINI.md
-  3. .git/info/exclude entries so none of the above ever dirties the tree
+  2. a .git/info/exclude entry so the farm never dirties the tree
      (never .gitignore - that file is tracked upstream)
 
 It is a *regenerator*, not a one-time installer: upstream adds, renames and
@@ -32,7 +30,7 @@ Filters given via --only/--exclude are persisted to
 Usage:
   link_fuchsia_skills.py [--root <fuchsia-dir>] [--dry-run]
                          [--only PREFIX ...] [--exclude PREFIX ...]
-                         [--reset-filters] [--no-agents-md]
+                         [--reset-filters]
 
 Stdlib only; no dependency on fx, jiri, or any harness.
 """
@@ -44,7 +42,7 @@ import re
 import subprocess
 import sys
 
-# Vendored subtrees whose SKILL.md / GEMINI.md files belong to *other*
+# Vendored subtrees whose SKILL.md files belong to *other*
 # projects, not Fuchsia.
 DEFAULT_PRUNE_PREFIXES = (
     "third_party/bazel_vendor/",
@@ -60,9 +58,7 @@ EXCLUDE_MARKER = "# managed by link_fuchsia_skills.py (fuchsia-claude-setup)"
 def find_root(explicit):
     if explicit:
         root = os.path.abspath(explicit)
-        if not os.path.isdir(os.path.join(root, ".jiri_root")) and not os.path.isfile(
-            os.path.join(root, "GEMINI.md")
-        ):
+        if not os.path.isdir(os.path.join(root, ".jiri_root")):
             sys.exit(f"error: {root} does not look like a Fuchsia checkout")
         return root
     d = os.getcwd()
@@ -233,30 +229,11 @@ def sync_skills(root, desired, dry_run):
     return counts
 
 
-def sync_agents_md(root, files, dry_run):
-    """Symlink AGENTS.md -> GEMINI.md beside every tracked GEMINI.md."""
-    made = []
-    for p in files:
-        if os.path.basename(p) != "GEMINI.md" or p.startswith(DEFAULT_PRUNE_PREFIXES):
-            continue
-        rel_dir = os.path.dirname(p)
-        link = os.path.join(root, rel_dir, "AGENTS.md")
-        action = sync_symlink(link, "GEMINI.md", dry_run)
-        rel_link = os.path.join(rel_dir, "AGENTS.md") if rel_dir else "AGENTS.md"
-        if action in ("new", "fixed"):
-            print(f"  {action:5}  {rel_link} -> GEMINI.md")
-        elif action == "skipped":
-            print(f"  skip   {rel_link}: a real file already exists; not bridging")
-        if action != "skipped":
-            made.append("/" + rel_link)
-    return made
-
-
-def sync_git_exclude(root, agents_links, dry_run):
+def sync_git_exclude(root, dry_run):
     exclude_path = os.path.join(
         root, git(root, "rev-parse", "--git-path", "info/exclude").strip()
     )
-    wanted = ["/.claude/"] + agents_links
+    wanted = ["/.claude/"]
     try:
         with open(exclude_path, encoding="utf-8") as f:
             existing = f.read().splitlines()
@@ -298,9 +275,6 @@ def main():
     ap.add_argument(
         "--reset-filters", action="store_true", help="forget persisted --only/--exclude"
     )
-    ap.add_argument(
-        "--no-agents-md", action="store_true", help="skip the AGENTS.md -> GEMINI.md bridge"
-    )
     args = ap.parse_args()
 
     root = find_root(args.root)
@@ -316,13 +290,8 @@ def main():
     for slug, first, renamed, rel_dir in collisions:
         print(f"  note   name collision on '{slug}' ({first}); linked {rel_dir} as '{renamed}'")
 
-    agents_links = []
-    if not args.no_agents_md:
-        print("\nAGENTS.md bridge:")
-        agents_links = sync_agents_md(root, files, args.dry_run)
-
     print("\ngit exclude (.git/info/exclude):")
-    added = sync_git_exclude(root, agents_links, args.dry_run)
+    added = sync_git_exclude(root, args.dry_run)
     if not added:
         print("  up to date")
 

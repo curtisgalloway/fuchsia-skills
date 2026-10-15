@@ -33,8 +33,27 @@ concrete recommendation.
 
 Do NOT use this for Linux kernel / clean-room hardware questions — use `cleanroom-investigator` (in the
 `cleanroom-skills` repo) for the clean-room case, or `hardware-investigator` + `board-expert` (in the
-`driver-lab` repo) when the answer may be cited. Do NOT use this for a simple "where is this
+`curtisgalloway/driver-lab` repo, `driver-porting` plugin — unrelated to Fuchsia's in-tree
+`driver-lab` skill) when the answer may be cited. Do NOT use this for a simple "where is this
 file / symbol defined" lookup — use `Explore`.
+
+### Check the in-tree skills first
+
+Fuchsia ships driver skills under `//src/devices/skills/` that answer several of the questions above
+directly; once `fuchsia-claude-setup` has linked them they load as ordinary skills. Try these before
+launching a subagent, and name the relevant one in the subagent prompt if you still launch:
+
+- `driver-bind-find-instance-name` — the instance name for a parent `Connect` (non-composite
+  drivers use `"default"`, composites the named parent)
+- `use-pdev-dfv2` (`driver_pdev/implementation/cpp`) — `fdf::PDev` usage
+- `driver-fidl-client-impl-cpp` / `-rust`, `driver-fidl-server-impl-cpp` / `-rust`, and the
+  `driver-fidl-debugging` / `driver-fidl-server-debugging` pair — FIDL between drivers
+- `debugging-driver-binding`, `driver-bind-devicetree`, and the `devicetree-*` skills — bind and
+  devicetree problems
+- `migrate-driver-base-to-driver-base2`, `migrate-dfv1-to-dfv2` — API migrations
+
+Names as linked by `fuchsia-claude-setup`, verified against fuchsia 5ded3fc08ae, 2026-10-15; list
+the current set with `git -C <fuchsia-checkout> ls-files 'src/devices/skills/*SKILL.md'`.
 
 ---
 
@@ -52,10 +71,9 @@ FUCHSIA_ROOT="$(git -C <fuchsia-checkout> rev-parse --show-toplevel 2>/dev/null 
                 || echo <fuchsia-checkout>)"
 
 # Our worktree (OUR driver + OUR CML/bind edits live here), if the project uses
-# one. Resolve by branch, not by a hardcoded path, since the worktree dir
-# changes with the branch name — substitute the project's topic branch.
-WORKTREE="$(git -C "$FUCHSIA_ROOT" worktree list --porcelain \
-            | awk '/^worktree /{w=$2} /branch .*<topic-branch>/{print w}')"
+# one. With `fx worktree`, resolve it by task name — slots sit on a detached
+# HEAD, so a lookup by branch name finds nothing. Substitute the task name.
+WORKTREE="$(cd "$FUCHSIA_ROOT" && fx worktree locate <task-name>)"
 
 # Sanity-check both before proceeding. If either is empty or missing, stop and
 # ask the user for the correct location rather than guessing.
@@ -90,7 +108,8 @@ sdk/fidl/                              FIDL protocol definitions
 sdk/lib/component/incoming/cpp/        component::kDefaultInstance, MakeServiceMemberPath
 src/devices/bus/drivers/platform/      Platform bus implementation (platform-device.cc is key)
 src/devices/bind/                      Bind libraries (fuchsia.platform, etc.)
-src/devices/board/drivers/             Board drivers (real examples to compare against)
+src/devices/board/drivers/             Board drivers (real examples to compare against; vim3 is now
+                                         vim3-devicetree/ — the old vim3/ board driver was deleted)
 src/devices/serial/drivers/            Serial drivers
 src/devices/i2c/drivers/               I2C drivers (good DFv2 examples)
 vendor/<vendor>/                       Vendor-specific code (Fuchsia's //vendor/...), if present —
@@ -113,6 +132,11 @@ a `vendor/` directory first (`test -d "$FUCHSIA_ROOT/vendor"`); if present, trea
   ```bash
   rg -l "PDev::Connect|pdev\.MapMmio|kFragmentName" "$FUCHSIA_ROOT/src/devices/"
   ```
+- **Mind gitignored petals.** `/third_party/*`, `/vendor/`, and `/local` are gitignored in fuchsia.git
+  (each is its own repo), so a tree-wide `rg` or the harness's Grep silently skips them. Pass the
+  petal path explicitly, add `--no-ignore-vcs`, or run `git grep` inside the petal's repo — upstream's
+  `AGENTS.md` now recommends `git grep` (`jiri grep` is deprecated; verified against fuchsia
+  5ded3fc08ae, 2026-10-15).
 - Pass real, already-resolved absolute paths to `rg`/`find` — never `$HOME`, `~`, or unverified command
   substitution inside the search itself.
 - Search within `$FUCHSIA_ROOT/sdk/` for API questions; within `$FUCHSIA_ROOT/src/devices/` for
@@ -130,7 +154,7 @@ The subagent should follow this order — it finds the answer faster than readin
    Compare it against our driver. The difference IS the answer. Good hunting grounds:
    - `src/devices/i2c/drivers/` (I2C device drivers using PDev)
    - `src/devices/spi/drivers/` (SPI drivers)
-   - `src/devices/board/drivers/vim3/` or `nelson/` or `sherlock/` (real board drivers)
+   - `src/devices/board/drivers/vim3-devicetree/` or `nelson/` or `sherlock/` (real board drivers)
    - `vendor/*/src/devices/` if the board is vendor-specific — the vendor's own driver is often the
      closest match, since it targets the same SoC family
    - Search: `rg -l "PDev::Connect|pdev\.MapMmio|kFragmentName" "$FUCHSIA_ROOT/src/devices/"`
@@ -176,7 +200,7 @@ driver's Start() and its meta/*.cml but not the platform-bus implementation.
 
 Trees:
   FUCHSIA_ROOT = /home/me/src/fuchsia            (SDK, framework, examples)
-  WORKTREE     = /home/me/src/fuchsia/.claude/worktrees/rpi5-port   (OUR driver + CML)
+  WORKTREE     = /home/me/src/fuchsia/.jiri_root/worktrees/rpi5-port   (OUR driver + CML)
 Read our driver and our CML from WORKTREE; read framework/SDK and any example driver
 from FUCHSIA_ROOT. Verify each path exists before reasoning about it.
 

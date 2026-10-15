@@ -6,8 +6,10 @@ SPDX-License-Identifier: Apache-2.0
 # Using Claude Code on the public Fuchsia tree
 
 For engineers used to the Gemini-based agent setup that fuchsia.git ships natively, moving to
-Claude Code. Short version: the tree's agent content (project instructions, ~80 in-tree skills)
-is all reusable — Claude just doesn't discover any of it until you install a small local bridge.
+Claude Code. Short version: the tree's agent content is all reusable. Claude Code reads the
+tree's `AGENTS.md` project instructions natively (upstream renamed them from `GEMINI.md` on
+2026-10-01), but it does not discover the in-tree skills (95 at fuchsia `5ded3fc08ae`,
+2026-10-15) until you install a small local bridge.
 
 ## Setup, in order
 
@@ -24,8 +26,6 @@ is all reusable — Claude just doesn't discover any of it until you install a s
    authentication failure Googlers hit on anonymous checkouts.
 4. **Bridge the tree** — from inside the checkout, ask Claude to run `fuchsia-claude-setup` (or
    run its `scripts/link_fuchsia_skills.py` yourself). This creates, locally and git-excluded:
-   - `AGENTS.md -> GEMINI.md` symlinks, so Claude loads the same project instructions gemini-cli
-     does (root and nested);
    - a generated `.claude/skills/` symlink farm over every tracked in-tree `SKILL.md`, replacing
      `skills.json`/`fx manage-skills` discovery;
    - `.git/info/exclude` entries so none of it ever shows up in `git status`.
@@ -37,10 +37,10 @@ is all reusable — Claude just doesn't discover any of it until you install a s
 
 | You had with Gemini | You get with Claude |
 |---|---|
-| `GEMINI.md` loaded automatically | same content via the `AGENTS.md` symlink |
+| `AGENTS.md` loaded automatically | the same files, read natively (never add a `CLAUDE.md` to the tree: it makes Claude Code skip every `AGENTS.md` above it) |
 | global skills from `//.agents/skills/` | same skills via the `.claude/skills/` farm |
 | team skills opted in via `fx manage-skills` / `skills.json` | `link_fuchsia_skills.py --only <path> ...` (persisted; default is *all* skills) |
-| `.geminiignore` widening search into `third_party/` etc. | no equivalent — use `jiri grep` or `rg --no-ignore-vcs` for cross-petal searches |
+| `.geminiignore` widening search into `third_party/` etc. | no equivalent — use `git grep` (what upstream `AGENTS.md` now recommends; `jiri grep` is deprecated) or `rg --no-ignore-vcs` for cross-petal searches |
 
 The in-tree skills themselves are plain `SKILL.md` files and work unmodified under Claude.
 
@@ -85,7 +85,8 @@ hosts; the clean-room skills have a marketplace of their own:
   writes the Fuchsia driver from the spec). Pair with `fuchsia-source` for the target-side
   DFv2 / bind / CML question.
 - **Hardware facts and specs** (`driver-porting`, from
-  [curtisgalloway/driver-lab](https://github.com/curtisgalloway/driver-lab)): `peripheral-spec`
+  [curtisgalloway/driver-lab](https://github.com/curtisgalloway/driver-lab), unrelated to the
+  in-tree `driver-lab` live-probing skill): `peripheral-spec`
   (a spec whose every fact cites its source lines, for code you may copy from), `board-expert`
   (reads board specs: memory maps, boot chain, interrupts, clocks; no per-board expert ships
   today), `hardware-investigator` (a hardware question answered as anchored facts), and
